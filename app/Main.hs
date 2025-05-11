@@ -1,6 +1,6 @@
 module Main where
 
-import Control.Monad.State (StateT, modify, get, put, lift, evalStateT)
+import Control.Monad.State (StateT, get, put, lift, evalStateT, runStateT)
 
 -- import Control.Applicative ((<|>))
 
@@ -66,48 +66,64 @@ data Type
 --
 
 
--- TODO: This is the wrong monad, the text needs to be passed as state
-type Parser a = String -> Either String (a, String)
+type Err = String
+type ParseM = StateT String (Either Err)
+type Parser a = ParseM a
+
+parse :: Parser a -> String -> Either Err a
+parse p text = evalStateT p text
+
+_parsed :: a -> String -> Parser a
+_parsed p current = do
+  put current
+  return p
+
+_err :: String -> Parser a
+_err = lift . Left
 
 
 char :: Char -> Parser Char
-char c s = case s of
-  (c2:s') | c2 == c -> Right (c, s')
-  _                 -> Left $ "Cannot match char " ++ [c]
+char c = do
+  text <- get
+  case text of
+    (c2:rest) | c == c2 -> _parsed c rest
+    _                   -> _err $ "Cannot match char " ++ [c]
 
 
 oneOf :: [Char] -> Parser Char
-oneOf options s = matchOneOf options
-  where err = "Cannot match any of " ++ options
-        matchOneOf []     = Left err
-        matchOneOf (c:cs) = case s of
-           (c':rest) | c' == c -> Right (c, rest)
+oneOf options = matchOneOf options
+  where matchOneOf []     = _err $ "Cannot match any of " ++ options
+        matchOneOf (c:cs) = do
+          text <- get
+          case text of
+           (c':rest) | c' == c -> _parsed c rest
            _                   -> matchOneOf cs
 
-
 optional :: Parser a -> Parser (Maybe a)
-optional p s = case p s of
-  Left  _       -> Right (Nothing, s)
-  Right (r, s') -> Right (Just r,  s')
+optional p = do
+  text <- get
+  let result = runStateT p text
+  case result of
+    Left  _         -> return Nothing
+    Right (r, rest) -> _parsed (Just r) rest
 
 many :: Parser a -> Parser [a]
-many p s = Right $ parseMany s
-  where parseMany str = case p str of
-            Left  _         -> ([], str)
-            Right (r, str') ->
-               let (rs, rest) = parseMany str'
-               in (r : rs, rest)
+many p = do
+  parsed <- optional p
+  case parsed of
+    Nothing -> return []
+    Just x -> do
+      more <- many p
+      return (x : more)
 
 many1 :: Parser a -> Parser [a]
-many1 p s = do
-  (a1, s') <- p s
-  (as, s'') <- many p s'
-  return $ (a1 : as, s'')
+many1 p = do
+  parsed <- p
+  more <- many p
+  return (parsed : more)
 
 digit :: Parser Char
 digit = oneOf ['0' .. '9']
 
 digits :: Parser String
 digits = many1 digit
-
-

@@ -24,7 +24,8 @@ data Statement
     = EStatement Expression
     | Return Expression
     | BareReturn
-    | NewVar String Expression
+    | NewVar String Type Expression
+    | Assign String Expression
     | If Expression Statement Statement
     | While Expression Statement
     | Block [Statement]
@@ -148,12 +149,10 @@ manySepBy p sep = do
   case parsed of
     Nothing -> return []
     Just x  -> do
-      s <- optional sep
-      case s of
-        Nothing -> return [x]
-        Just _  -> do
-          more <- manySepBy p sep
-          return (x : more)
+      more <- many $ do
+        sep
+        p
+      return (x : more)
 
 options :: [Parser a] -> Parser a
 options parsers = tryOption parsers
@@ -202,6 +201,12 @@ anyLinearWhitespace = do
   many $ oneOf " \t"
   return ()
 
+-- one or more whitespace characters, not including newlines
+any1LinearWhitespace :: Parser ()
+any1LinearWhitespace = do
+  many1 $ oneOf " \t"
+  return ()
+
 -- zero or more whitespace characters, including newlines
 anyWhitespace :: Parser ()
 anyWhitespace = do
@@ -209,6 +214,114 @@ anyWhitespace = do
   return ()
 
 ----
+
+statement :: Parser Statement
+statement = do
+  anyLinearWhitespace
+  options [block, returnParser, bareReturn, while, ifParser, newVar, assign, exprStatement]
+
+block :: Parser Statement
+block = do
+  char '{'
+  char '\n'
+  statements <- manySepBy statement (char '\n')
+  char '\n'
+  anyWhitespace
+  char '}'
+  return $ Block statements
+
+returnParser :: Parser Statement
+returnParser = do
+  string "return"
+  anyLinearWhitespace
+  e <- expression
+  return $ Return e
+
+bareReturn :: Parser Statement
+bareReturn = do
+  string "return"
+  return $ BareReturn
+
+while :: Parser Statement
+while = do
+  string "while"
+  any1LinearWhitespace
+  condition <- expression
+  anyLinearWhitespace
+  body <- block
+  return $ While condition body
+
+ifParser :: Parser Statement
+ifParser = do
+  string "if"
+  any1LinearWhitespace
+  condition <- expression
+  anyLinearWhitespace
+  body <- block
+  any1LinearWhitespace
+  string "else"
+  any1LinearWhitespace
+  elseBody <- block
+  return $ If condition body elseBody
+
+newVar :: Parser Statement
+newVar = do
+  string "var"
+  any1LinearWhitespace
+  varName <- letters
+  any1LinearWhitespace
+  varType <- typeParser
+  any1LinearWhitespace
+  char '='
+  any1LinearWhitespace
+  value <- expression
+  return $ NewVar varName varType value
+
+assign :: Parser Statement
+assign = do
+  varName <- letters
+  any1LinearWhitespace
+  char '='
+  any1LinearWhitespace
+  value <- expression
+  return $ Assign varName value
+
+exprStatement :: Parser Statement
+exprStatement = do
+  expr <- expression
+  return $ EStatement expr
+
+typeParser :: Parser Type
+typeParser = options [voidType, intType, stringType, charType, funcType]
+
+voidType :: Parser Type
+voidType = do
+  string "Void"
+  return Void
+
+intType :: Parser Type
+intType = do
+  string "Int"
+  return Int
+
+stringType :: Parser Type
+stringType = do
+  string "String"
+  return String
+
+charType :: Parser Type
+charType = do
+  string "Char"
+  return Char
+
+funcType :: Parser Type
+funcType = do
+  string "Fn("
+  args <- manySepBy typeParser argSeparator
+  char ')'
+  any1LinearWhitespace
+  retType <- typeParser
+  return $ Func $ FnType args retType
 
 expression :: Parser Expression
 expression = binaryExpression

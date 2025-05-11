@@ -215,6 +215,25 @@ anyWhitespace = do
 
 ----
 
+moduleParser :: Parser Module
+moduleParser = do
+  anyWhitespace
+  string "module"
+  any1LinearWhitespace
+  name <- letters
+  char '\n'
+
+  functions <- manySepBy function functionSep
+
+  return $ Module name functions
+
+functionSep :: Parser ()
+functionSep = do
+  anyLinearWhitespace
+  char '\n'
+  anyWhitespace
+  return ()
+
 function :: Parser Function
 function = do
   string "func"

@@ -50,7 +50,7 @@ data Op
     | Divide
     | And
     | Or
-    deriving (Show)
+    deriving (Eq, Show)
 
 data FnType = FnType [Type] Type
     deriving (Show)
@@ -142,6 +142,19 @@ many1 p = do
   more <- many p
   return (parsed : more)
 
+manySepBy :: Parser a -> Parser b -> Parser [a]
+manySepBy p sep = do
+  parsed <- optional p
+  case parsed of
+    Nothing -> return []
+    Just x  -> do
+      s <- optional sep
+      case s of
+        Nothing -> return [x]
+        Just _  -> do
+          more <- manySepBy p sep
+          return (x : more)
+
 options :: [Parser a] -> Parser a
 options parsers = tryOption parsers
   where tryOption []     = _err "no parsers given to options"
@@ -155,7 +168,8 @@ options parsers = tryOption parsers
               -- that parser failed, so restore the value of text before trying the next one
               put text
               tryOption ps
-            Right (r, _) ->
+            Right (r, text') -> do
+              put text'
               return r
 
 -- this succeeds if the given parser fails
@@ -182,6 +196,18 @@ letter = oneOf (['a'..'z'] ++ ['A'..'Z'])
 letters :: Parser String
 letters = many1 letter
 
+-- zero or more whitespace characters, not including newlines
+anyLinearWhitespace :: Parser ()
+anyLinearWhitespace = do
+  many $ oneOf " \t"
+  return ()
+
+-- zero or more whitespace characters, including newlines
+anyWhitespace :: Parser ()
+anyWhitespace = do
+  many $ oneOf " \t\n"
+  return ()
+
 ----
 
 intValue :: Parser Value
@@ -200,10 +226,93 @@ stringValue = do
 value :: Parser Value
 value = options [intValue, stringValue]
 
-
-op :: Parser Op
-op = options $ zipWith opOption ["+", "-", "*", "/", "and", "or"] [Plus, Minus, Times, Divide, And, Or]
-  where opOption s o = do
+opParser :: Parser Op
+opParser = options $ zipWith opOption names values
+  where names = ["+", "-", "*", "/", "and", "or"]
+        values = [Plus, Minus, Times, Divide, And, Or]
+        opOption s o = do
           string s
           return o
 
+expression :: Parser Expression
+expression = binaryExpression
+
+binaryExpression :: Parser Expression
+binaryExpression = do
+  (expressions, ops) <- readBinExprParts
+  return $ unfoldParts expressions ops
+
+readBinExprParts :: Parser ([Expression], [Op])
+readBinExprParts = do
+  left <- unaryExpression
+  anyLinearWhitespace
+  parts <- many $ do
+    op <- opParser
+    anyWhitespace
+    right <- unaryExpression
+    anyLinearWhitespace
+    return (op, right)
+  let (ops, rights) = unzip parts
+  return (left : rights, ops)
+
+unfoldParts :: [Expression] -> [Op] -> Expression
+unfoldParts exprs ops =
+  let ([result], []) = foldl unfoldOps (exprs, ops) precOrder
+  in result
+
+unfoldOps :: ([Expression], [Op]) -> [Op] -> ([Expression], [Op])
+unfoldOps ([e],    [])   _     = ([e], [])
+unfoldOps ([],     [])   _     = ([], [])
+unfoldOps (l:r:es, o:os) opset =
+  if elem o opset
+  then unfoldOps (BinaryOp o l r : es, os) opset
+  else let (restE, restO) = unfoldOps (r:es, os) opset
+       in (l:restE, o:restO)
+unfoldOps _ _ = error "invalid call"
+
+precOrder :: [[Op]]
+precOrder =
+  [ [Times, Divide]
+  , [Plus, Minus]
+  , [Or]
+  , [And]
+  ]
+
+unaryExpression :: Parser Expression
+unaryExpression = options [paren, call, literal, variable]
+
+paren :: Parser Expression
+paren = do
+  char '('
+  anyWhitespace
+  inner <- expression
+  anyWhitespace
+  char ')'
+  return $ Paren inner
+
+call :: Parser Expression
+call = do
+  -- Right now, expressions that evaluate to a function aren't supported
+  fnName <- letters
+  char '('
+  anyWhitespace
+  arguments <- manySepBy expression argSeparator
+  anyWhitespace
+  char ')'
+  return $ Call (Variable fnName) arguments
+
+argSeparator :: Parser ()
+argSeparator = do
+  char ','
+  anyWhitespace
+  return ()
+
+literal :: Parser Expression
+literal = do
+  val <- value
+  return $ Literal val
+
+variable :: Parser Expression
+variable = do
+  name <- letters
+  return $ Variable name

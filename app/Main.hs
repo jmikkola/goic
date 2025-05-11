@@ -2,10 +2,14 @@ module Main where
 
 import Control.Monad.State (StateT, get, put, lift, evalStateT, runStateT)
 
--- import Control.Applicative ((<|>))
-
 main :: IO ()
 main = putStrLn "Hello, Haskell!"
+
+-- next
+-- - read a file, parse it
+-- - find out how to set the exit code based on the parse result
+-- - add a typecheck pass
+-- - start a compiler
 
 --
 -- Define the types for the language's AST

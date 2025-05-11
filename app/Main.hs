@@ -32,7 +32,9 @@ data Statement
 
 data Expression
     = Literal Value
+    | Variable String
     | BinaryOp Op Expression Expression
+    | Paren Expression
     | Call Expression [Expression]
     deriving (Show)
 
@@ -90,14 +92,32 @@ char c = do
     _                   -> _err $ "Cannot match char " ++ [c]
 
 
+string :: String -> Parser String
+string s = do
+  _string s
+  return s
+
+_string :: String -> Parser ()
+_string [] = return ()
+_string (c:cs) = do
+  char c
+  _string cs
+
 oneOf :: [Char] -> Parser Char
-oneOf options = matchOneOf options
-  where matchOneOf []     = _err $ "Cannot match any of " ++ options
-        matchOneOf (c:cs) = do
-          text <- get
-          case text of
-           (c':rest) | c' == c -> _parsed c rest
-           _                   -> matchOneOf cs
+oneOf options = do
+  text <- get
+  case text of
+    (c:rest) | elem c options -> _parsed c rest
+    _                         -> _err $ "Cannot match any of " ++ options
+
+
+noneOf :: [Char] -> Parser Char
+noneOf options = do
+  text <- get
+  case text of
+    (c:rest) | not (elem c options) -> _parsed c rest
+    _                               -> _err $ "Character was one of " ++ options
+
 
 optional :: Parser a -> Parser (Maybe a)
 optional p = do
@@ -122,8 +142,68 @@ many1 p = do
   more <- many p
   return (parsed : more)
 
+options :: [Parser a] -> Parser a
+options parsers = tryOption parsers
+  where tryOption []     = _err "no parsers given to options"
+        tryOption [p]    = p
+        tryOption (p:ps) = do
+          -- save the current value of text
+          text <- get
+          let result = runStateT p text
+          case result of
+            Left _  -> do
+              -- that parser failed, so restore the value of text before trying the next one
+              put text
+              tryOption ps
+            Right (r, _) ->
+              return r
+
+-- this succeeds if the given parser fails
+non :: Parser a -> Parser ()
+non p = do
+  text <- get
+  let result = runStateT p text
+  case result of
+    Left _ -> do
+      put text
+      return ()
+    Right _ ->
+      _err "inner parser succeeded"
+
 digit :: Parser Char
 digit = oneOf ['0' .. '9']
 
 digits :: Parser String
 digits = many1 digit
+
+letter :: Parser Char
+letter = oneOf (['a'..'z'] ++ ['A'..'Z'])
+
+letters :: Parser String
+letters = many1 letter
+
+----
+
+intValue :: Parser Value
+intValue = do
+  parsed <- digits
+  return $ VInt (read parsed)
+
+stringValue :: Parser Value
+stringValue = do
+  char '"'
+  -- todo: handle escaped strings
+  text <- many $ noneOf ['"']
+  char '"'
+  return $ VString text
+
+value :: Parser Value
+value = options [intValue, stringValue]
+
+
+op :: Parser Op
+op = options $ zipWith opOption ["+", "-", "*", "/", "and", "or"] [Plus, Minus, Times, Divide, And, Or]
+  where opOption s o = do
+          string s
+          return o
+

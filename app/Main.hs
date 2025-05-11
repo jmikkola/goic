@@ -1,13 +1,38 @@
 module Main where
 
 import Control.Monad.State (StateT, get, put, lift, evalStateT, runStateT)
+import System.Environment (getArgs)
+import System.IO (hPutStrLn, stderr)
+import System.Exit (exitFailure)
 
 main :: IO ()
-main = putStrLn "Hello, Haskell!"
+main = getArgs >>= parseArgs >>= readFile >>= parseAndShowFile
+
+putErrLn :: String -> IO ()
+putErrLn = hPutStrLn stderr
+
+parseArgs :: [String] -> IO String
+parseArgs [a] = return a
+parseArgs _   = do
+  putErrLn "Usage: goic [filename.gc]"
+  exitFailure
+
+parseFile :: String -> IO Module
+parseFile content =
+  case parse moduleParser content of
+    Left err -> do
+      putErrLn "Error parsing file:"
+      putErrLn err
+      exitFailure
+    Right result -> do
+      return result
+
+parseAndShowFile :: String -> IO ()
+parseAndShowFile content = do
+  result <- parseFile content
+  putStrLn $ show result
 
 -- next
--- - read a file, parse it
--- - find out how to set the exit code based on the parse result
 -- - add a typecheck pass
 -- - start a compiler
 
@@ -79,6 +104,13 @@ type Parser a = ParseM a
 
 parse :: Parser a -> String -> Either Err a
 parse p text = evalStateT p text
+
+eof :: Parser ()
+eof = do
+  text <- get
+  if text == ""
+    then return ()
+    else _err $ "Expected eof, got " ++ (take 100 text)
 
 _parsed :: a -> String -> Parser a
 _parsed p current = do
@@ -226,8 +258,12 @@ moduleParser = do
   any1LinearWhitespace
   name <- letters
   char '\n'
+  anyWhitespace
 
   functions <- manySepBy function functionSep
+
+  anyWhitespace
+  eof
 
   return $ Module name functions
 
@@ -277,6 +313,7 @@ block = do
   char '{'
   char '\n'
   statements <- manySepBy statement (char '\n')
+  anyLinearWhitespace
   char '\n'
   anyWhitespace
   char '}'

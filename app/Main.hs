@@ -17,7 +17,7 @@ data Program = Program [Module]
 data Module = Module String [Function]
     deriving (Show)
 
-data Function = Function String FnType Statement
+data Function = Function String FnType [String] Statement
     deriving (Show)
 
 data Statement
@@ -214,6 +214,35 @@ anyWhitespace = do
   return ()
 
 ----
+
+function :: Parser Function
+function = do
+  string "func"
+  any1LinearWhitespace
+
+  name <- letters
+  char '('
+  anyWhitespace
+  typedArgs <- manySepBy typedArg argSeparator
+  anyWhitespace
+  char ')'
+
+  any1LinearWhitespace
+  returnType <- typeParser
+  any1LinearWhitespace
+
+  body <- block
+
+  let (argNames, argTypes) = unzip typedArgs
+  let t = FnType argTypes returnType
+  return $ Function name t argNames body
+
+typedArg :: Parser (String, Type)
+typedArg = do
+  name <- letters
+  any1LinearWhitespace
+  t <- typeParser
+  return (name, t)
 
 statement :: Parser Statement
 statement = do

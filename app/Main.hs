@@ -6,7 +6,7 @@ import System.IO (hPutStrLn, stderr)
 import System.Exit (exitFailure)
 
 main :: IO ()
-main = getArgs >>= parseArgs >>= readFile >>= parseAndShowFile
+main = getArgs >>= parseArgs >>= readFile >>= parseFile >>= (putStrLn . show)
 
 putErrLn :: String -> IO ()
 putErrLn = hPutStrLn stderr
@@ -26,11 +26,6 @@ parseFile content =
       exitFailure
     Right result -> do
       return result
-
-parseAndShowFile :: String -> IO ()
-parseAndShowFile content = do
-  result <- parseFile content
-  putStrLn $ show result
 
 -- next
 -- - add a typecheck pass

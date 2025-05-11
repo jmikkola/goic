@@ -210,30 +210,6 @@ anyWhitespace = do
 
 ----
 
-intValue :: Parser Value
-intValue = do
-  parsed <- digits
-  return $ VInt (read parsed)
-
-stringValue :: Parser Value
-stringValue = do
-  char '"'
-  -- todo: handle escaped strings
-  text <- many $ noneOf ['"']
-  char '"'
-  return $ VString text
-
-value :: Parser Value
-value = options [intValue, stringValue]
-
-opParser :: Parser Op
-opParser = options $ zipWith opOption names values
-  where names = ["+", "-", "*", "/", "and", "or"]
-        values = [Plus, Minus, Times, Divide, And, Or]
-        opOption s o = do
-          string s
-          return o
-
 expression :: Parser Expression
 expression = binaryExpression
 
@@ -316,3 +292,28 @@ variable :: Parser Expression
 variable = do
   name <- letters
   return $ Variable name
+
+
+intValue :: Parser Value
+intValue = do
+  parsed <- digits
+  return $ VInt (read parsed)
+
+stringValue :: Parser Value
+stringValue = do
+  char '"'
+  -- todo: handle escaped strings
+  text <- many $ noneOf ['"']
+  char '"'
+  return $ VString text
+
+value :: Parser Value
+value = options [intValue, stringValue]
+
+opParser :: Parser Op
+opParser = options $ zipWith opOption names values
+  where names = ["+", "-", "*", "/", "and", "or"]
+        values = [Plus, Minus, Times, Divide, And, Or]
+        opOption s o = do
+          string s
+          return o

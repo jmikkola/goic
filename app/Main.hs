@@ -31,6 +31,111 @@ parseFile content =
 -- - add a typecheck pass
 -- - start a compiler
 
+data Source = FnDecl | Argument | Local
+  deriving (Eq, Show)
+
+type Names = [(String, (Type, Source))]
+
+checkStatement :: Names -> Type -> Statement -> Either Err Names
+checkStatement names returnType stmt = case stmt of
+  EStatement expr -> do
+    _ <- typecheck names expr
+    return names
+  Return expr -> do
+    t <- typecheck names expr
+    errIf (t /= returnType) ("Return type is " ++ show returnType ++ " but return expression is " ++ show t)
+    return names
+  BareReturn ->
+    if returnType /= Void
+      then Left $ "Return type is " ++ show returnType ++ " but return has no expression"
+      else return names
+  NewVar name t expr -> do
+    errIf (hasName name names) ("Duplicate definition of variable " ++ name)
+    exprT <- typecheck names expr
+    errIf (exprT /= t) ("Type mismatch for declaration of variable " ++ name ++ ", type is " ++ show t ++
+      " but expression is " ++ show exprT)
+    let names' = (name, (t, Local)) : names
+    return names'
+  Assign name expression -> do
+    (t, source) <- case lookup name names of
+      Nothing -> Left ("Assigning to an undefined variable " ++ name)
+      Just ts -> return ts
+    errIf (source == FnDecl) ("Cannot assign a value to a function: " ++ name)
+    exprT <- typecheck names expression
+    errIf (exprT /= t) ("Type mismatch for assignment to variable " ++ name ++ ", type is " ++ show t ++
+                       " but expression is " ++ show exprT)
+    return names
+  If test body0 body1 -> do
+    testT <- typecheck names test
+    errIf (testT /= Int) ("If statement test value must be an Int, got " ++ show testT)
+    checkStatement names returnType body0
+    checkStatement names returnType body1
+    return names
+  While test body -> do
+    testT <- typecheck names test
+    errIf (testT /= Int) ("While statement test value must be an Int, got " ++ show testT)
+    checkStatement names returnType body
+    return names
+  Block stmts -> do
+    checkStatements names returnType stmts
+    -- return the original names unchanged, because variables declared in the block only exist
+    -- inside that block
+    return names
+
+checkStatements :: Names -> Type -> [Statement] -> Either Err ()
+checkStatements _     _ []        = return ()
+checkStatements names t (s:stmts) = do
+  -- check that there aren't statements after an unconditional return
+  if not $ null stmts
+    then case s of
+           Return _   -> Left "Statements after a return statement"
+           BareReturn -> Left "Statements after a return statement"
+    else return ()
+
+  names' <- checkStatement names t s
+  -- let names declared in the block be used for subsequent statements inside that block
+  checkStatements names' t stmts
+
+hasName :: String -> Names -> Bool
+hasName name names = case lookup name names of
+  Nothing -> False
+  Just _  -> True
+
+getType :: String -> Names -> Maybe Type
+getType name names = fst <$> lookup name names
+
+errIf :: Bool -> String -> Either Err ()
+errIf False _   = return ()
+errIf True  err = Left err
+
+
+typecheck :: Names -> Expression -> Either Err Type
+typecheck names (Literal val)   = Right $ case val of
+  VInt    _ -> Int
+  VString _ -> String
+typecheck names (Variable name) = case getType name names of
+  Just t -> Right t
+  Nothing -> Left $ "Variable not defined: " ++ name
+typecheck names (BinaryOp o l r) = do
+  lType <- typecheck names l
+  rType <- typecheck names r
+  if lType /= rType
+    then Left $ "Type mismatch for " ++ show o ++ ": " ++ show lType ++ " and " ++ show rType
+    else if lType == Int then Right Int
+         else if lType == String && o == Plus
+              then Right String
+              else Left $ "Invalid type for " ++ show o ++ ": " ++ show lType
+typecheck names (Paren e) =
+  typecheck names e
+typecheck names (Call e args) = do
+  fnType <- typecheck names e
+  argTypes <- mapM (typecheck names) args
+  case fnType of
+    (Func (FnType args ret)) | args == argTypes -> Right ret
+    _                                           ->
+      Left $ "Cannot call function with type " ++ show fnType ++ " with args of types " ++ show argTypes
+
+
 --
 -- Define the types for the language's AST
 --
@@ -78,7 +183,7 @@ data Op
     deriving (Eq, Show)
 
 data FnType = FnType [Type] Type
-    deriving (Show)
+    deriving (Eq, Show)
 
 data Type
     = Func FnType
@@ -86,7 +191,7 @@ data Type
     | Int
     | String
     | Char
-    deriving (Show)
+    deriving (Eq, Show)
 
 --
 -- Parser for the basic language

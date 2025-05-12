@@ -1,6 +1,7 @@
 module Main where
 
 import Control.Monad.State (StateT, get, put, lift, evalStateT, runStateT)
+import Data.Char (toLower)
 import System.Environment (getArgs)
 import System.IO (hPutStrLn, stderr)
 import System.Exit (exitFailure)
@@ -12,6 +13,91 @@ next:
 
 main :: IO ()
 main = getArgs >>= parseArgs >>= readFile >>= parseFile >>= checkFile >>= (putStrLn . show)
+
+data ASM
+  = Instruction Instr
+  | Label String
+  | Directive String [String]
+  deriving (Show)
+
+data Instr
+  = Endbr64
+  | Pushq Arg
+  | Movq Arg Arg
+  | Movl Arg Arg
+  | Addl Arg Arg
+  | Popq Arg
+  | Ret
+  deriving (Show)
+
+data Arg
+  = Immediate Int
+  | Address String
+  | Register8 Reg8
+  | R8Offset Int Reg8
+  | R8Address Reg8
+  | R8Index Reg8 Reg8
+  | R8Scaled Reg8 Reg8 Int
+  | R8ScaledOffset Int Reg8 Reg8 Int
+  -- | R4 Reg4
+  -- | R4Offset Int Reg4
+  -- | R4Address Reg4
+  -- | R4Index Reg4 Reg4
+  -- | R4Scaled Reg4 Reg4 Int
+  -- | R4Offset Int Reg4 Reg4 Int
+  deriving (Show)
+
+data Reg8 = RAX | RBX | RCX | RDX | RSI | RDI | RSP | RBP | R8 | R9 | R10 | R11 | R12 | R13 | R14 | R15
+  deriving (Show)
+
+data Reg4 = EAX | EBX | ECX | EDX | ESI | EDI | ESP | EBP
+  deriving (Show)
+
+
+class Render a where
+  render :: a -> String
+
+instance Render Reg8 where
+  render reg = "%" ++ map toLower (show reg)
+
+instance Render Arg where
+  render arg = case arg of
+    Immediate n -> "$" ++ show n
+    Address s   -> s
+    Register8 r -> render r
+
+    R8Offset       offset r ->
+      show offset ++ "(" ++ render r ++ ")"
+    R8Address             r ->
+      "(" ++ render r ++ ")"
+    R8Index               r index ->
+      "(" ++ render r ++ "," ++ render index ++ ")"
+    R8Scaled              r index scale ->
+      "(" ++ render r ++ "," ++ render index ++ "," ++ show scale ++ ")"
+    R8ScaledOffset offset r index scale ->
+      show offset ++ "(" ++ render r ++ "," ++ render index ++ "," ++ show scale ++  ")"
+
+instance Render Instr where
+  render instr = case instr of
+    Endbr64   -> "endbr64"
+    Ret       -> "ret"
+    Popq  arg -> "popq\t" ++ render arg
+    Pushq arg -> "pushq\t" ++ render arg
+    Movq a b  -> "movq\t" ++ render a ++ ", " ++ render b
+    Movl a b  -> "movl\t" ++ render a ++ ", " ++ render b
+    Addl a b  -> "addl\t" ++ render a ++ ", " ++ render b
+
+instance Render ASM where
+  render (Instruction instr)   = "\t" ++ render instr
+  render (Label label)         = "." ++ label ++ ":"
+  render (Directive name [])   = "\t." ++ name
+  render (Directive name args) = "\t." ++ name ++ "\t" ++ join " " args
+
+join :: String -> [String] -> String
+join _ [] = ""
+join _ [x] = x
+join j (x:ys) = x ++ j ++ (join j ys)
+
 
 putErrLn :: String -> IO ()
 putErrLn = hPutStrLn stderr

@@ -5,8 +5,13 @@ import System.Environment (getArgs)
 import System.IO (hPutStrLn, stderr)
 import System.Exit (exitFailure)
 
+{-
+next:
+- start a compiler
+-}
+
 main :: IO ()
-main = getArgs >>= parseArgs >>= readFile >>= parseFile >>= (putStrLn . show)
+main = getArgs >>= parseArgs >>= readFile >>= parseFile >>= checkFile >>= (putStrLn . show)
 
 putErrLn :: String -> IO ()
 putErrLn = hPutStrLn stderr
@@ -27,14 +32,39 @@ parseFile content =
     Right result -> do
       return result
 
--- next
--- - add a typecheck pass
--- - start a compiler
+checkFile :: Module -> IO Module
+checkFile m =
+  case checkModule m of
+    Left err -> do
+      putErrLn err
+      exitFailure
+    Right _ ->
+      return m
 
-data Source = FnDecl | Argument | Local
+data Source = Builtin | FnDecl | Argument | Local
   deriving (Eq, Show)
 
 type Names = [(String, (Type, Source))]
+
+builtins :: Names
+builtins = [("println", (Func $ FnType [String] Void, Builtin))]
+
+checkModule :: Module -> Either Err ()
+checkModule (Module name functions) = do
+  let funcNames = map fnName functions
+  let duplicates = findDuplicates (map fst funcNames)
+  errIf (not $ null duplicates) ("Duplicate function names: " ++ show duplicates)
+  let names = funcNames ++ builtins
+  mapM_ (checkFunction names) functions
+
+checkFunction :: Names -> Function -> Either Err ()
+checkFunction names (Function _ fnt argNames body) = do
+  let duplicates = findDuplicates argNames
+  errIf (not $ null duplicates) ("Duplicate argument names: " ++ show duplicates)
+  let (FnType argTypes retType) = fnt
+  let theArgs = zip argNames $ zip argTypes $ repeat Argument
+  _ <- checkStatement (theArgs ++ names) retType body
+  return ()
 
 checkStatement :: Names -> Type -> Statement -> Either Err Names
 checkStatement names returnType stmt = case stmt of
@@ -60,7 +90,7 @@ checkStatement names returnType stmt = case stmt of
     (t, source) <- case lookup name names of
       Nothing -> Left ("Assigning to an undefined variable " ++ name)
       Just ts -> return ts
-    errIf (source == FnDecl) ("Cannot assign a value to a function: " ++ name)
+    errIf (elem source [FnDecl, Builtin]) ("Cannot assign a value to a function: " ++ name)
     exprT <- typecheck names expression
     errIf (exprT /= t) ("Type mismatch for assignment to variable " ++ name ++ ", type is " ++ show t ++
                        " but expression is " ++ show exprT)
@@ -136,6 +166,15 @@ typecheck names (Call e args) = do
       Left $ "Cannot call function with type " ++ show fnType ++ " with args of types " ++ show argTypes
 
 
+findDuplicates :: (Ord a) => [a] -> [a]
+findDuplicates items = findDup [] [] items
+  where findDup _    duplicates []     = duplicates
+        findDup seen duplicates (i:is) =
+          if elem i seen
+          then if elem i duplicates
+               then findDup seen duplicates is
+               else findDup seen (i : duplicates) is
+          else findDup (i : seen) duplicates is
 --
 -- Define the types for the language's AST
 --
@@ -192,6 +231,9 @@ data Type
     | String
     | Char
     deriving (Eq, Show)
+
+fnName :: Function -> (String, (Type, Source))
+fnName (Function name fnT _ _) = (name, (Func fnT, FnDecl))
 
 --
 -- Parser for the basic language

@@ -12,7 +12,13 @@ next:
 -}
 
 main :: IO ()
-main = getArgs >>= parseArgs >>= readFile >>= parseFile >>= checkFile >>= (putStrLn . show)
+main = getArgs >>= parseArgs >>= runForName
+
+runForName :: String -> IO ()
+runForName filename = do
+  parsedModule <- readFile filename >>= parseFile >>= checkFile
+  let compiled = compile parsedModule filename
+  putStrLn $ render compiled
 
 data ASM
   = Instruction Instr
@@ -91,7 +97,36 @@ instance Render ASM where
   render (Instruction instr)   = "\t" ++ render instr
   render (Label label)         = "." ++ label ++ ":"
   render (Directive name [])   = "\t." ++ name
-  render (Directive name args) = "\t." ++ name ++ "\t" ++ join " " args
+  render (Directive name args) = "\t." ++ name ++ "\t" ++ join ", " args
+
+instance Render [ASM] where
+  render instructions = join "\n" $ map render instructions
+
+
+compile :: Module -> String -> [ASM]
+compile (Module name functions) filename =
+  modulePreamble filename ++ concatMap compileFunction functions
+
+modulePreamble :: String -> [ASM]
+modulePreamble name =
+  [ Directive "file" [name]
+  , Directive "text" []
+  ]
+
+compileFunction :: Function -> [ASM]
+compileFunction (Function name t argNames body) =
+  functionPreamble name ++ compileBody t argNames body
+
+functionPreamble :: String -> [ASM]
+functionPreamble name =
+  [ Directive "globl" [name]
+  , Directive "type"  [name, "@function"]
+  , Label name
+  ]
+
+compileBody :: FnType -> [String] -> Statement -> [ASM]
+compileBody = undefined
+
 
 join :: String -> [String] -> String
 join _ [] = ""

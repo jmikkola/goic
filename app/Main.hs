@@ -6,10 +6,9 @@ import System.Environment (getArgs)
 import System.IO (hPutStrLn, stderr)
 import System.Exit (exitFailure)
 
-{-
-next:
-- start a compiler
--}
+--
+-- Top-level, IO functions
+--
 
 main :: IO ()
 main = getArgs >>= parseArgs >>= runForName
@@ -19,6 +18,29 @@ runForName filename = do
   parsedModule <- readFile filename >>= parseFile >>= checkFile
   let compiled = compile parsedModule filename
   putStrLn $ render compiled
+
+putErrLn :: String -> IO ()
+putErrLn = hPutStrLn stderr
+
+parseArgs :: [String] -> IO String
+parseArgs [a] = return a
+parseArgs _   = do
+  putErrLn "Usage: goic [filename.gc]"
+  exitFailure
+
+parseFile :: String -> IO Module
+parseFile content =
+  case parse moduleParser content of
+    Left err -> do
+      putErrLn "Error parsing file:"
+      putErrLn err
+      exitFailure
+    Right result -> do
+      return result
+
+--
+-- Compiler backend (emits assembly)
+--
 
 data ASM
   = Instruction Instr
@@ -134,24 +156,9 @@ join _ [x] = x
 join j (x:ys) = x ++ j ++ (join j ys)
 
 
-putErrLn :: String -> IO ()
-putErrLn = hPutStrLn stderr
-
-parseArgs :: [String] -> IO String
-parseArgs [a] = return a
-parseArgs _   = do
-  putErrLn "Usage: goic [filename.gc]"
-  exitFailure
-
-parseFile :: String -> IO Module
-parseFile content =
-  case parse moduleParser content of
-    Left err -> do
-      putErrLn "Error parsing file:"
-      putErrLn err
-      exitFailure
-    Right result -> do
-      return result
+--
+-- Type and semantic checks
+--
 
 checkFile :: Module -> IO Module
 checkFile m =
@@ -296,6 +303,7 @@ findDuplicates items = findDup [] [] items
                then findDup seen duplicates is
                else findDup seen (i : duplicates) is
           else findDup (i : seen) duplicates is
+
 --
 -- Define the types for the language's AST
 --
@@ -359,7 +367,6 @@ fnName (Function name fnT _ _) = (name, (Func fnT, FnDecl))
 --
 -- Parser for the basic language
 --
-
 
 type Err = String
 type ParseM = StateT String (Either Err)

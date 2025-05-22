@@ -126,7 +126,7 @@ instance Render [ASM] where
 
 
 compile :: Module -> String -> [ASM]
-compile (Module name functions) filename =
+compile (Module _ functions) filename =
   modulePreamble filename ++ concatMap compileFunction functions
 
 modulePreamble :: String -> [ASM]
@@ -178,7 +178,7 @@ builtins :: Names
 builtins = [("println", (Func $ FnType [String] Void, Builtin))]
 
 checkModule :: Module -> Either Err ()
-checkModule (Module name functions) = do
+checkModule (Module _ functions) = do
   let funcNames = map fnName functions
   let duplicates = findDuplicates (map fst funcNames)
   errIf (not $ null duplicates) ("Duplicate function names: " ++ show duplicates)
@@ -214,25 +214,25 @@ checkStatement names returnType stmt = case stmt of
       " but expression is " ++ show exprT)
     let names' = (name, (t, Local)) : names
     return names'
-  Assign name expression -> do
+  Assign name expr -> do
     (t, source) <- case lookup name names of
       Nothing -> Left ("Assigning to an undefined variable " ++ name)
       Just ts -> return ts
     errIf (elem source [FnDecl, Builtin]) ("Cannot assign a value to a function: " ++ name)
-    exprT <- typecheck names expression
+    exprT <- typecheck names expr
     errIf (exprT /= t) ("Type mismatch for assignment to variable " ++ name ++ ", type is " ++ show t ++
                        " but expression is " ++ show exprT)
     return names
   If test body0 body1 -> do
     testT <- typecheck names test
     errIf (testT /= Int) ("If statement test value must be an Int, got " ++ show testT)
-    checkStatement names returnType body0
-    checkStatement names returnType body1
+    _ <- checkStatement names returnType body0
+    _ <- checkStatement names returnType body1
     return names
   While test body -> do
     testT <- typecheck names test
     errIf (testT /= Int) ("While statement test value must be an Int, got " ++ show testT)
-    checkStatement names returnType body
+    _ <- checkStatement names returnType body
     return names
   Block stmts -> do
     checkStatements names returnType stmts
@@ -248,6 +248,7 @@ checkStatements names t (s:stmts) = do
     then case s of
            Return _   -> Left "Statements after a return statement"
            BareReturn -> Left "Statements after a return statement"
+           _          -> return ()
     else return ()
 
   names' <- checkStatement names t s
@@ -268,7 +269,7 @@ errIf True  err = Left err
 
 
 typecheck :: Names -> Expression -> Either Err Type
-typecheck names (Literal val)   = Right $ case val of
+typecheck _     (Literal val)   = Right $ case val of
   VInt    _ -> Int
   VString _ -> String
 typecheck names (Variable name) = case getType name names of
@@ -289,8 +290,8 @@ typecheck names (Call e args) = do
   fnType <- typecheck names e
   argTypes <- mapM (typecheck names) args
   case fnType of
-    (Func (FnType args ret)) | args == argTypes -> Right ret
-    _                                           ->
+    (Func (FnType fargs ret)) | fargs == argTypes -> Right ret
+    _                                             ->
       Left $ "Cannot call function with type " ++ show fnType ++ " with args of types " ++ show argTypes
 
 
@@ -391,39 +392,39 @@ _err :: String -> Parser a
 _err = lift . Left
 
 
-char :: Char -> Parser Char
+char :: Char -> Parser ()
 char c = do
   text <- get
-  case text of
+  discard $ case text of
     (c2:rest) | c == c2 -> _parsed c rest
     _                   -> _err $ "Cannot match char " ++ [c]
 
 
-string :: String -> Parser String
-string s = do
-  _string s
-  return s
+-- string :: String -> Parser String
+-- string s = do
+--   _string s
+--   return s
 
-_string :: String -> Parser ()
-_string [] = return ()
-_string (c:cs) = do
+string :: String -> Parser ()
+string [] = return ()
+string (c:cs) = do
   char c
-  _string cs
+  string cs
 
 oneOf :: [Char] -> Parser Char
-oneOf options = do
+oneOf opts = do
   text <- get
   case text of
-    (c:rest) | elem c options -> _parsed c rest
-    _                         -> _err $ "Cannot match any of " ++ options
+    (c:rest) | elem c opts -> _parsed c rest
+    _                      -> _err $ "Cannot match any of " ++ opts
 
 
 noneOf :: [Char] -> Parser Char
-noneOf options = do
+noneOf opts = do
   text <- get
   case text of
-    (c:rest) | not (elem c options) -> _parsed c rest
-    _                               -> _err $ "Character was one of " ++ options
+    (c:rest) | not (elem c opts) -> _parsed c rest
+    _                            -> _err $ "Character was one of " ++ opts
 
 
 optional :: Parser a -> Parser (Maybe a)
@@ -456,7 +457,7 @@ manySepBy p sep = do
     Nothing -> return []
     Just x  -> do
       more <- many $ do
-        sep
+        discard sep
         p
       return (x : more)
 
@@ -503,20 +504,20 @@ letters = many1 letter
 
 -- zero or more whitespace characters, not including newlines
 anyLinearWhitespace :: Parser ()
-anyLinearWhitespace = do
-  many $ oneOf " \t"
-  return ()
+anyLinearWhitespace = discard $ many $ oneOf " \t"
 
 -- one or more whitespace characters, not including newlines
 any1LinearWhitespace :: Parser ()
-any1LinearWhitespace = do
-  many1 $ oneOf " \t"
-  return ()
+any1LinearWhitespace = discard $ many1 $ oneOf " \t"
 
 -- zero or more whitespace characters, including newlines
 anyWhitespace :: Parser ()
-anyWhitespace = do
-  many $ oneOf " \t\n"
+anyWhitespace = discard $ many $ oneOf " \t\n"
+
+-- Ignore the results of a parser in a way that doesn't trigger a compiler warning
+discard :: Parser a -> Parser ()
+discard p = do
+  _ <- p
   return ()
 
 ----
@@ -705,8 +706,9 @@ readBinExprParts = do
 
 unfoldParts :: [Expression] -> [Op] -> Expression
 unfoldParts exprs ops =
-  let ([result], []) = foldl unfoldOps (exprs, ops) precOrder
-  in result
+  case foldl unfoldOps (exprs, ops) precOrder of
+    ([result], []) -> result
+    _              -> undefined
 
 unfoldOps :: ([Expression], [Op]) -> [Op] -> ([Expression], [Op])
 unfoldOps ([e],    [])   _     = ([e], [])
@@ -741,13 +743,13 @@ paren = do
 call :: Parser Expression
 call = do
   -- Right now, expressions that evaluate to a function aren't supported
-  fnName <- letters
+  funcName <- letters
   char '('
   anyWhitespace
   arguments <- manySepBy expression argSeparator
   anyWhitespace
   char ')'
-  return $ Call (Variable fnName) arguments
+  return $ Call (Variable funcName) arguments
 
 argSeparator :: Parser ()
 argSeparator = do
@@ -757,7 +759,7 @@ argSeparator = do
 
 literal :: Parser Expression
 literal = do
-  val <- value
+  val <- valueParser
   return $ Literal val
 
 variable :: Parser Expression
@@ -779,8 +781,8 @@ stringValue = do
   char '"'
   return $ VString text
 
-value :: Parser Value
-value = options [intValue, stringValue]
+valueParser :: Parser Value
+valueParser = options [intValue, stringValue]
 
 opParser :: Parser Op
 opParser = options $ zipWith opOption names values

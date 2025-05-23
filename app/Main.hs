@@ -1,6 +1,7 @@
 module Main where
 
-import Control.Monad.State (StateT, get, put, lift, evalStateT, runStateT)
+import Control.Monad.Extra (concatMapM)
+import Control.Monad.State (StateT, State, get, put, lift, evalStateT, runStateT, runState)
 import Data.Char (toLower)
 import System.Environment (getArgs)
 import System.IO (hPutStrLn, stderr)
@@ -16,8 +17,10 @@ main = getArgs >>= parseArgs >>= runForName
 runForName :: String -> IO ()
 runForName filename = do
   parsedModule <- readFile filename >>= parseFile >>= checkFile
-  let compiled = compile parsedModule filename
-  putStrLn $ render compiled
+  let lowered = lowerProgram (Program [parsedModule])
+  putStrLn $ runRenderProgram lowered
+  -- let compiled = compile parsedModule filename
+  -- putStrLn $ render compiled
 
 putErrLn :: String -> IO ()
 putErrLn = hPutStrLn stderr
@@ -306,6 +309,241 @@ findDuplicates items = findDup [] [] items
           else findDup (i : seen) duplicates is
 
 --
+-- Lowering pass
+--
+
+type Lowering a = State Int a
+
+lowerProgram :: Program -> LProgram
+lowerProgram (Program modules) =
+  LProgram $ concatMap lowerModule modules
+
+lowerModule :: Module -> [LFunction]
+lowerModule (Module _ functions) =
+  map lowerFunction functions
+
+lowerFunction :: Function -> LFunction
+lowerFunction (Function name _ args body) =
+  let (b, _) = runState (lowerStatement body) 0
+  in LFunction name args b
+
+lowerStatement :: Statement -> Lowering [LStatement]
+lowerStatement stmt = case stmt of
+  EStatement expr -> do
+    (stmts, e) <- lowerExpression expr
+    return $ stmts ++ [LExprStmt e]
+  Return expr -> do
+    (stmts, v) <- toValue expr
+    return $ stmts ++ [LReturn v]
+  BareReturn ->
+    return [LBareReturn]
+  NewVar name _ expr -> do
+    (stmts, e) <- lowerExpression expr
+    return $ stmts ++ [LAssign name e]
+  Assign name expr -> do
+    (stmts, e) <- lowerExpression expr
+    return $ stmts ++ [LAssign name e]
+  If expr thenCase elseCase -> do
+    (stmts, v) <- toValue expr
+    thenStmts <- lowerStatement thenCase
+    elseStmts <- lowerStatement elseCase
+    return $ stmts ++ [LIf v thenStmts elseStmts]
+  While expr body -> do
+    (stmts, v) <- toValue expr
+    bodyStmts <- lowerStatement body
+    return $ stmts ++ [LWhile v bodyStmts]
+  Block inner -> concatMapM lowerStatement inner
+
+toValue :: Expression -> Lowering ([LStatement], LValue)
+toValue expr = case expr of
+  Literal value  -> return ([], LLiteral value)
+  Variable name  -> return ([], LVariable name)
+  Paren inner    -> toValue inner
+  BinaryOp _ _ _ -> expressionToVar expr
+  Call _ _       -> expressionToVar expr
+
+expressionToVar :: Expression -> Lowering ([LStatement], LValue)
+expressionToVar expr = do
+  (stmts, e) <- lowerExpression expr
+  resultVar <- newVarName
+  return (stmts ++ [LAssign resultVar e], LVariable resultVar)
+
+lowerExpression :: Expression -> Lowering ([LStatement], LExpression)
+lowerExpression expr = case expr of
+  Literal value -> return ([], LLit $ LLiteral value)
+  Variable name -> return ([], LLit $ LVariable name)
+  BinaryOp op l r -> do
+    (lStmts, lVal) <- toValue l
+    (rStmts, rVal) <- toValue r
+    return (lStmts ++ rStmts, LBinaryOp op lVal rVal)
+  Paren inner -> lowerExpression inner
+  Call fnExpr argExprs -> do
+    (fnStmts, fnVal) <- toValue fnExpr
+    argStmtsVals <- mapM toValue argExprs
+    let (argStmts, argVals) = unzip argStmtsVals
+    return (fnStmts ++ concat argStmts, LCall fnVal argVals)
+
+newVarName :: Lowering String
+newVarName = do
+  varNum <- get
+  put (varNum + 1)
+  return $ "$v" ++ show varNum
+
+data LProgram = LProgram [LFunction]
+  deriving (Show)
+
+data LFunction = LFunction String [String] [LStatement]
+  deriving (Show)
+
+data LStatement
+    = LExprStmt LExpression
+    | LReturn LValue
+    | LBareReturn
+    | LAssign String LExpression
+    | LIf LValue [LStatement] [LStatement]
+    | LWhile LValue [LStatement]
+    deriving (Show)
+
+data LExpression
+    = LBinaryOp Op LValue LValue
+    | LCall LValue [LValue]
+    | LLit LValue
+    deriving (Show)
+
+data LValue
+    = LVariable String
+    | LLiteral Value
+    deriving (Show)
+
+--
+-- Functions to print lowered code
+--
+
+-- The state is (Indent, Written)
+type Rendering = State (String, [String]) ()
+
+runRenderProgram :: LProgram -> String
+runRenderProgram =
+  runRender renderProgram
+
+runRender :: (a -> Rendering) -> a -> String
+runRender renderer value =
+  let startingIndent = ""
+      startingWritten = []
+      startingState = (startingIndent, startingWritten)
+      (_, (_, written)) = runState (renderer value) startingState
+  in concat $ reverse written
+
+indented :: Rendering -> Rendering
+indented r = do
+  (indent, written) <- get
+  put ("  " ++ indent, written)
+  r
+  (_, written2) <- get
+  put (indent, written2)
+  return ()
+
+writeIndent :: Rendering
+writeIndent = do
+  (indent, _) <- get
+  output indent
+
+output :: String -> Rendering
+output s = do
+  (indent, written) <- get
+  put (indent, s : written)
+
+
+writeLine :: Rendering -> Rendering
+writeLine r = do
+  writeIndent
+  r
+  output "\n"
+
+outputLine :: String -> Rendering
+outputLine = writeLine . output
+
+intersperse :: Rendering -> (a -> Rendering) -> [a] -> Rendering
+intersperse joiner renderer values = case values of
+  []     -> return ()
+  [v]    -> renderer v
+  (v:vs) -> do
+    renderer v
+    joiner
+    intersperse joiner renderer vs
+
+renderProgram :: LProgram -> Rendering
+renderProgram (LProgram functions) =
+  intersperse (output "\n\n") renderFunction functions
+
+renderFunction :: LFunction -> Rendering
+renderFunction (LFunction name args body) = do
+  writeLine $ do
+    output "func "
+    output name
+    output "("
+    output $ join ", " $ args
+    output ") {"
+  indented $ mapM_ renderStatement body
+  output "}"
+
+renderStatement :: LStatement -> Rendering
+renderStatement stmt = case stmt of
+  LExprStmt e -> writeLine $ do
+    output "_ = "
+    renderExpression e
+  LReturn val -> writeLine $ do
+    output "return "
+    renderVal val
+  LBareReturn ->
+    outputLine "return"
+  LAssign var expr -> writeLine $ do
+    output var
+    output " = "
+    renderExpression expr
+  LIf val thenCase elseCase -> do
+    writeLine $ do
+      output "if "
+      renderVal val
+      output " {"
+    indented $ mapM_ renderStatement thenCase
+    if null elseCase
+    then outputLine "}"
+    else do
+      outputLine "} else {"
+      indented $ mapM_ renderStatement elseCase
+      outputLine "}"
+  LWhile val body -> do
+    writeLine $ do
+      output "while "
+      renderVal val
+      output " {"
+    indented $ mapM_ renderStatement body
+    outputLine "}"
+
+renderExpression :: LExpression -> Rendering
+renderExpression expr = case expr of
+  LBinaryOp op l r ->
+    output $ unwords [render l, render op, render r]
+  LCall fn args -> do
+    renderVal fn
+    output "("
+    output $ join ", " $ map render args
+    output ")"
+  LLit value ->
+    renderVal value
+
+renderVal :: LValue -> Rendering
+renderVal (LVariable s)    = output s
+renderVal (LLiteral value) = output $ render value
+
+instance Render LValue where
+  render (LVariable s) = s
+  render (LLiteral value) = case value of
+    (VInt i)    -> show i
+    (VString s) -> show s
+
+--
 -- Define the types for the language's AST
 --
 
@@ -364,6 +602,20 @@ data Type
 
 fnName :: Function -> (String, (Type, Source))
 fnName (Function name fnT _ _) = (name, (Func fnT, FnDecl))
+
+instance Render Value where
+  render (VInt i) = show i
+  render (VString s) = show s
+
+instance Render Op where
+  render op = case op of
+    Plus   -> "+"
+    Minus  -> "-"
+    Times  -> "*"
+    Divide -> "/"
+    And    -> "and"
+    Or     -> "or"
+
 
 --
 -- Parser for the basic language
@@ -502,6 +754,9 @@ letter = oneOf (['a'..'z'] ++ ['A'..'Z'])
 letters :: Parser String
 letters = many1 letter
 
+alphaNum :: Parser Char
+alphaNum = oneOf (['a'..'z'] ++ ['A'..'Z'] ++ ['0' .. '9'] ++ ['_'])
+
 -- zero or more whitespace characters, not including newlines
 anyLinearWhitespace :: Parser ()
 anyLinearWhitespace = discard $ many $ oneOf " \t"
@@ -522,12 +777,18 @@ discard p = do
 
 ----
 
+nameParser :: Parser String
+nameParser = do
+  first <- letter
+  rest <- many alphaNum
+  return $ first : rest
+
 moduleParser :: Parser Module
 moduleParser = do
   anyWhitespace
   string "module"
   any1LinearWhitespace
-  name <- letters
+  name <- nameParser
   char '\n'
   anyWhitespace
 
@@ -550,7 +811,7 @@ function = do
   string "func"
   any1LinearWhitespace
 
-  name <- letters
+  name <- nameParser
   char '('
   anyWhitespace
   typedArgs <- manySepBy typedArg argSeparator
@@ -569,7 +830,7 @@ function = do
 
 typedArg :: Parser (String, Type)
 typedArg = do
-  name <- letters
+  name <- nameParser
   any1LinearWhitespace
   t <- typeParser
   return (name, t)
@@ -585,8 +846,11 @@ block = do
   char '\n'
   statements <- manySepBy statement (char '\n')
   anyLinearWhitespace
-  char '\n'
-  anyWhitespace
+  if null statements
+    then anyWhitespace
+    else do
+      char '\n'
+      anyWhitespace
   char '}'
   return $ Block statements
 
@@ -628,7 +892,7 @@ newVar :: Parser Statement
 newVar = do
   string "var"
   any1LinearWhitespace
-  varName <- letters
+  varName <- nameParser
   any1LinearWhitespace
   varType <- typeParser
   any1LinearWhitespace
@@ -639,7 +903,7 @@ newVar = do
 
 assign :: Parser Statement
 assign = do
-  varName <- letters
+  varName <- nameParser
   any1LinearWhitespace
   char '='
   any1LinearWhitespace
@@ -743,7 +1007,7 @@ paren = do
 call :: Parser Expression
 call = do
   -- Right now, expressions that evaluate to a function aren't supported
-  funcName <- letters
+  funcName <- nameParser
   char '('
   anyWhitespace
   arguments <- manySepBy expression argSeparator
@@ -764,7 +1028,7 @@ literal = do
 
 variable :: Parser Expression
 variable = do
-  name <- letters
+  name <- nameParser
   return $ Variable name
 
 

@@ -1,0 +1,21 @@
+module main
+
+func main() Void {
+	println("Hello, world!")
+}
+
+func add(a Int, b Int) Int {
+    return a + b
+}
+
+func f1() Void {
+  add(1, 2)
+}
+
+func f2() Void {
+  add(add(1, 2), add(3, 4))
+}
+
+func f3() Void {
+  add(2 * 3, 10 - 9 - 8)
+}

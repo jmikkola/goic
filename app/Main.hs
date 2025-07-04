@@ -70,11 +70,12 @@ data ASM
   deriving (Show)
 
 data Instr
-  = Pushq Arg
+  = Push Arg
   | Movq Arg Arg
   | Movl Arg Arg
-  | Addl Arg Arg
-  | Popq Arg
+  | Addq Arg Arg
+  | Subq Arg Arg
+  | Pop Arg
   | Ret
   deriving (Show)
 
@@ -126,12 +127,13 @@ instance Render Arg where
 
 instance Render Instr where
   render instr = case instr of
-    Ret       -> "ret"
-    Popq  arg -> "popq\t" ++ render arg
-    Pushq arg -> "pushq\t" ++ render arg
-    Movq a b  -> "movq\t" ++ render a ++ ", " ++ render b
-    Movl a b  -> "movl\t" ++ render a ++ ", " ++ render b
-    Addl a b  -> "addl\t" ++ render a ++ ", " ++ render b
+    Ret      -> "ret"
+    Pop  arg -> "popq\t" ++ render arg
+    Push arg -> "pushq\t" ++ render arg
+    Movq a b -> "movq\t" ++ render a ++ ", " ++ render b
+    Movl a b -> "movl\t" ++ render a ++ ", " ++ render b
+    Addq a b -> "addq\t" ++ render a ++ ", " ++ render b
+    Subq a b -> "subq\t" ++ render a ++ ", " ++ render b
 
 instance Render ASM where
   render (Instruction instr)   = "\t" ++ render instr
@@ -164,7 +166,77 @@ functionPreamble name =
   ]
 
 compileBody :: FnType -> [String] -> Statement -> [ASM]
-compileBody = undefined
+compileBody t argNames body =
+  -- todo: figure out what location (register or offset) each argument is passed in
+  let instructions = functionPrologue ++ compileStatement body ++ functionEpilogue
+  in map Instruction instructions
+
+-- TODO: support optionally saving some callee-saved registers
+functionPrologue :: [Instr]
+functionPrologue =
+  [ Push $ Register8 $ RBP
+  , Movq (Register8 $ RBP) (Register8 $ RSP)
+  ]
+
+-- TODO: support optionally restoring some callee-saved registers
+functionEpilogue :: [Instr]
+functionEpilogue =
+  [ Movq (Register8 $ RSP) (Register8 $ RBP)
+  , Pop $ Register8 $ RBP
+  ]
+
+compileStatement :: Statement -> [Instr]
+compileStatement statement = case statement of
+  EStatement expr -> compileExpression expr
+  Return     expr -> compileExpression expr ++ [Ret]
+  BareReturn      -> [Ret]
+  NewVar name t expr ->
+    -- TODO: determine where on the stack `name` lives
+    -- also reserve space on the stack for it
+    -- then compile the expression and mov the result into that stack location
+    undefined
+  Assign name expr ->
+    -- TODO: lookup where on the stack `name` lives
+    -- then compile the expression and mov the result into it
+    undefined
+  If expr tcase ecase ->
+    -- TODO: add code to handle ifs
+    undefined
+  While test body ->
+    -- TODO: add code to handle while
+    undefined
+  Block statements ->
+    concatMap compileStatement statements
+
+
+compileExpression :: Expression -> [Instr]
+compileExpression expression = case expression of
+  Literal value -> case value of
+    VInt i    -> [Movq (Register8 $ RAX) (Immediate i)]
+    VString s -> undefined -- TODO
+  Variable name ->
+    -- TODO: look up where this variable or argument is stored
+    undefined
+  BinaryOp op left right ->
+    concat [ compileExpression left
+           , [Push $ Register8 RAX]
+           , compileExpression right
+           , [ Movq (Register8 RBX) (Register8 RAX)
+             , Pop $ Register8 RAX
+             ]
+           , compileOp op
+           ]
+  Paren inner -> compileExpression inner
+  Call (Variable fnName) args ->
+    undefined -- TODO: compute args in order, flip order in the stack, pop the
+              -- first 6 into registers, emit the call instruction
+  _ -> undefined
+
+
+compileOp :: Op -> [Instr]
+compileOp Plus = [Addq (Register8 RAX) (Register8 RBX)]
+compileOp Minus = [Subq (Register8 RAX) (Register8 RBX)]
+compileOp _ = undefined -- TODO
 
 
 join :: String -> [String] -> String

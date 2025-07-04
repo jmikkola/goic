@@ -70,8 +70,7 @@ data ASM
   deriving (Show)
 
 data Instr
-  = Endbr64
-  | Pushq Arg
+  = Pushq Arg
   | Movq Arg Arg
   | Movl Arg Arg
   | Addl Arg Arg
@@ -107,28 +106,26 @@ class Render a where
   render :: a -> String
 
 instance Render Reg8 where
-  render reg = "%" ++ map toLower (show reg)
+  render reg = map toLower (show reg)
 
 instance Render Arg where
   render arg = case arg of
-    Immediate n -> "$" ++ show n
+    Immediate n -> show n
     Address s   -> s
     Register8 r -> render r
-
     R8Offset       offset r ->
-      show offset ++ "(" ++ render r ++ ")"
+      "[" ++ render r ++ "+" ++ show offset ++ "]"
     R8Address             r ->
-      "(" ++ render r ++ ")"
+      "[" ++ render r ++ "]"
     R8Index               r index ->
-      "(" ++ render r ++ "," ++ render index ++ ")"
+      "[" ++ render r ++ "+" ++ render index ++ "]"
     R8Scaled              r index scale ->
-      "(" ++ render r ++ "," ++ render index ++ "," ++ show scale ++ ")"
+      "[" ++ render r ++ "+" ++ render index ++ "*" ++ show scale ++ "]"
     R8ScaledOffset offset r index scale ->
-      show offset ++ "(" ++ render r ++ "," ++ render index ++ "," ++ show scale ++  ")"
+      "[" ++ render r ++ "+" ++ render index ++ "*" ++ show scale ++ "+" ++ show offset ++ "]"
 
 instance Render Instr where
   render instr = case instr of
-    Endbr64   -> "endbr64"
     Ret       -> "ret"
     Popq  arg -> "popq\t" ++ render arg
     Pushq arg -> "pushq\t" ++ render arg
@@ -139,8 +136,8 @@ instance Render Instr where
 instance Render ASM where
   render (Instruction instr)   = "\t" ++ render instr
   render (Label label)         = "." ++ label ++ ":"
-  render (Directive name [])   = "\t." ++ name
-  render (Directive name args) = "\t." ++ name ++ "\t" ++ join ", " args
+  render (Directive name [])   = "\t" ++ name
+  render (Directive name args) = "\t" ++ name ++ "\t" ++ join ", " args
 
 instance Render [ASM] where
   render instructions = join "\n" $ map render instructions
@@ -153,7 +150,7 @@ compile (Module _ functions) filename =
 modulePreamble :: String -> [ASM]
 modulePreamble name =
   [ Directive "file" [name]
-  , Directive "text" []
+  , Directive "section" [".text"]
   ]
 
 compileFunction :: Function -> [ASM]
@@ -162,8 +159,7 @@ compileFunction (Function name t argNames body) =
 
 functionPreamble :: String -> [ASM]
 functionPreamble name =
-  [ Directive "globl" [name]
-  , Directive "type"  [name, "@function"]
+  [ Directive "global" [name]
   , Label name
   ]
 

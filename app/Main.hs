@@ -7,6 +7,8 @@ import Data.Char (toLower)
 import System.Environment (getArgs)
 import System.IO (hPutStrLn, stderr)
 import System.Exit (exitFailure)
+import System.Process (createProcess, proc, waitForProcess)
+import System.Exit (ExitCode(..))
 
 --
 -- Top-level, IO functions
@@ -39,6 +41,23 @@ parseFile content =
       exitFailure
     Right result -> do
       return result
+
+
+--
+-- Process utility
+--
+
+runSubprocess :: FilePath -> [String] -> IO ()
+runSubprocess cmd args = do
+    (_, _, _, ph) <- createProcess (proc cmd args)
+
+    -- Wait for it to finish
+    exitCode <- waitForProcess ph
+
+    -- Check the result
+    case exitCode of
+        ExitSuccess   -> return ()
+        ExitFailure c -> error $ "Process failed with exit code: " ++ show c
 
 --
 -- Compiler backend (emits assembly)

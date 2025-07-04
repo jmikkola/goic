@@ -68,7 +68,7 @@ executable goic
     -- other-extensions:
 
     -- Other library packages from which modules are imported.
-    build-depends:    base ^>=4.18.3.0, mtl, extra
+    build-depends:    base ^>=4.18.3.0, mtl, extra, process
 
     -- Directories containing source files.
     hs-source-dirs:   app

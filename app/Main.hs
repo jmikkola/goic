@@ -1,9 +1,10 @@
 module Main where
 
 -- import Control.Monad.Extra (concatMapM)
--- state, runState
-import Control.Monad.State (StateT, get, put, lift, evalStateT, runStateT)
+import Control.Monad.State (StateT, State, get, put, lift, evalStateT, runStateT, runState)
 import Data.Char (toLower)
+import Data.Map (Map)
+import qualified Data.Map as Map
 import System.Environment (getArgs)
 import System.IO (hPutStrLn, stderr)
 import System.Exit (exitFailure)
@@ -144,10 +145,33 @@ instance Render ASM where
 instance Render [ASM] where
   render instructions = join "\n" $ map render instructions
 
+data CompileState =
+  CompileState
+  { strings :: Map String String -- name to value
+  , argNames :: [String]
+  , localVars :: Map String Int -- local var offsets
+  }
+  deriving (Show)
+
+type Compiler a = State CompileState a
+
+emptyCompileState :: CompileState
+emptyCompileState =
+  CompileState
+  { strings = Map.empty
+  , argNames = []
+  , localVars = Map.empty
+  }
 
 compile :: Module -> String -> [ASM]
 compile (Module _ functions) filename =
-  modulePreamble filename ++ concatMap compileFunction functions
+  let preamble = modulePreamble filename
+      (fnTexts, state) = runState (mapM compileFunction functions) emptyCompileState
+      stringDecls = compileStringDecls (strings state)
+  in preamble ++ stringDecls ++ concat fnTexts
+
+-- TODO
+compileStringDecls _ = []
 
 modulePreamble :: String -> [ASM]
 modulePreamble name =
@@ -155,9 +179,17 @@ modulePreamble name =
   , Directive "section" [".text"]
   ]
 
-compileFunction :: Function -> [ASM]
-compileFunction (Function name t argNames body) =
-  functionPreamble name ++ compileBody t argNames body
+compileFunction :: Function -> Compiler [ASM]
+compileFunction (Function name t argNames body) = do
+  -- Setup the state for the fuction body
+  state <- get
+  put (state { argNames = argNames, localVars = Map.empty })
+  let preamble = functionPreamble name
+  asm <- compileBody t argNames body
+  -- Clear the function-specific parts of the state
+  state' <- get
+  put (state' { argNames = [], localVars = Map.empty })
+  return (preamble ++ asm)
 
 functionPreamble :: String -> [ASM]
 functionPreamble name =
@@ -165,11 +197,11 @@ functionPreamble name =
   , Label name
   ]
 
-compileBody :: FnType -> [String] -> Statement -> [ASM]
-compileBody t argNames body =
-  -- todo: figure out what location (register or offset) each argument is passed in
-  let instructions = functionPrologue ++ compileStatement body ++ functionEpilogue
-  in map Instruction instructions
+compileBody :: FnType -> [String] -> Statement -> Compiler [ASM]
+compileBody t argNames body = do
+  compiledBody <- compileStatement body
+  let instructions = functionPrologue ++ compiledBody ++ functionEpilogue
+  return $ map Instruction instructions
 
 -- TODO: support optionally saving some callee-saved registers
 functionPrologue :: [Instr]
@@ -185,11 +217,13 @@ functionEpilogue =
   , Pop $ Register8 $ RBP
   ]
 
-compileStatement :: Statement -> [Instr]
+compileStatement :: Statement -> Compiler [Instr]
 compileStatement statement = case statement of
   EStatement expr -> compileExpression expr
-  Return     expr -> compileExpression expr ++ [Ret]
-  BareReturn      -> [Ret]
+  Return     expr -> do
+    exprInstrs <- compileExpression expr
+    return $ exprInstrs ++ [Ret]
+  BareReturn      -> return [Ret]
   NewVar name t expr ->
     -- TODO: determine where on the stack `name` lives
     -- also reserve space on the stack for it
@@ -205,27 +239,30 @@ compileStatement statement = case statement of
   While test body ->
     -- TODO: add code to handle while
     undefined
-  Block statements ->
-    concatMap compileStatement statements
+  Block statements -> do
+    statementInstrs <- mapM compileStatement statements
+    return $ concat statementInstrs
 
 
-compileExpression :: Expression -> [Instr]
+compileExpression :: Expression -> Compiler [Instr]
 compileExpression expression = case expression of
   Literal value -> case value of
-    VInt i    -> [Movq (Register8 $ RAX) (Immediate i)]
+    VInt i    -> return [Movq (Register8 $ RAX) (Immediate i)]
     VString s -> undefined -- TODO
   Variable name ->
     -- TODO: look up where this variable or argument is stored
     undefined
-  BinaryOp op left right ->
-    concat [ compileExpression left
-           , [Push $ Register8 RAX]
-           , compileExpression right
-           , [ Movq (Register8 RBX) (Register8 RAX)
-             , Pop $ Register8 RAX
-             ]
-           , compileOp op
-           ]
+  BinaryOp op left right -> do
+    leftInstrs <- compileExpression left
+    rightInstrs <- compileExpression right
+    return $ concat [ leftInstrs
+                    , [Push $ Register8 RAX]
+                    , rightInstrs
+                    , [ Movq (Register8 RBX) (Register8 RAX)
+                      , Pop $ Register8 RAX
+                      ]
+                    , compileOp op
+                    ]
   Paren inner -> compileExpression inner
   Call (Variable fnName) args ->
     undefined -- TODO: compute args in order, flip order in the stack, pop the

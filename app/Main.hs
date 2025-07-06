@@ -223,11 +223,13 @@ functionEpilogue :: [Instr]
 functionEpilogue =
   [ Mov (Register8 $ RSP) (Register8 $ RBP)
   , Pop $ Register8 $ RBP
+  , Ret
   ]
 
 compileStatement :: Statement -> Compiler [Instr]
 compileStatement statement = case statement of
   EStatement expr -> compileExpression expr
+  -- TODO: these returns also need the function epilogue
   Return     expr -> do
     exprInstrs <- compileExpression expr
     return $ exprInstrs ++ [Ret]

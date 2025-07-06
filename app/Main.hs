@@ -68,6 +68,8 @@ data ASM
   = Instruction Instr
   | Label String
   | Directive String [String]
+  -- name, type, value
+  | Constant String String String
   deriving (Show)
 
 data Instr
@@ -137,10 +139,11 @@ instance Render Instr where
     CallI arg -> "call\t" ++ render arg
 
 instance Render ASM where
-  render (Instruction instr)   = "\t" ++ render instr
-  render (Label label)         = "." ++ label ++ ":"
-  render (Directive name [])   = "\t" ++ name
-  render (Directive name args) = "\t" ++ name ++ "\t" ++ join ", " args
+  render (Instruction instr)     = "\t" ++ render instr
+  render (Label label)           = "." ++ label ++ ":"
+  render (Directive name [])     = name
+  render (Directive name args)   = name ++ "\t" ++ join ", " args
+  render (Constant name t value) = "\t" ++ name ++ " " ++ t ++ " " ++ value
 
 instance Render [ASM] where
   render instructions = join "\n" $ map render instructions
@@ -165,19 +168,17 @@ emptyCompileState =
 
 compile :: Module -> String -> [ASM]
 compile (Module _ functions) filename =
-  let preamble = modulePreamble filename
-      (fnTexts, state) = runState (mapM compileFunction functions) emptyCompileState
+  let (fnTexts, state) = runState (mapM compileFunction functions) emptyCompileState
       stringDecls = compileStringDecls (strings state)
-  in preamble ++ stringDecls ++ concat fnTexts
+      textSection = [Directive "section" [".text"]]
+  in stringDecls ++ textSection ++ concat fnTexts
 
--- TODO
-compileStringDecls _ = []
-
-modulePreamble :: String -> [ASM]
-modulePreamble name =
-  [ Directive "file" [name]
-  , Directive "section" [".text"]
-  ]
+compileStringDecls :: Map String String -> [ASM]
+compileStringDecls strs =
+  let pairs = Map.toList strs
+      values = [ Constant name "db" (show value)
+               | (name, value) <- pairs ]
+  in [Directive "section" [".data"]] ++ values
 
 compileFunction :: Function -> Compiler [ASM]
 compileFunction (Function name t argNames body) = do

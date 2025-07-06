@@ -140,7 +140,7 @@ instance Render Instr where
 
 instance Render ASM where
   render (Instruction instr)     = "\t" ++ render instr
-  render (Label label)           = "." ++ label ++ ":"
+  render (Label label)           = label ++ ":"
   render (Directive name [])     = name
   render (Directive name args)   = name ++ "\t" ++ join ", " args
   render (Constant name t value) = "\t" ++ name ++ " " ++ t ++ " " ++ value
@@ -194,6 +194,12 @@ compileFunction (Function name t argNames body) = do
   return (preamble ++ asm)
 
 functionPreamble :: String -> [ASM]
+functionPreamble "main" =
+  [ Directive "global" ["main"]
+  , Label "main"
+  , Directive "global" ["_start"]
+  , Label "_start"
+  ]
 functionPreamble name =
   [ Directive "global" [name]
   , Label name

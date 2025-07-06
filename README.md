@@ -10,9 +10,29 @@ The eventual goal is to try to learn x86_64 assembly.
 
 ## Next
 
-- Add a println builtin for the sake of compiling main.gc
-- Support emitting strings (including adding a state monad)
+- Fix linking
 - Variables
 - Other math instructions
 - Function calls
 - Control flow
+
+## Assembling and Linking
+
+Assembler command:
+
+    yasm -Worphan-labels -g dwarf2 -f elf64 main.asm
+
+Link command:
+
+    ld -g -o main main.o -lc --dynamic-linker /lib64/ld-linux-x86-64.so.2 -e _start
+
+It seems like it needs
+
+```
+    ;; exit
+    mov rax, SYS_exit
+    mov rdi, EXIT_SUCCESS
+    syscall
+```
+
+at the end to not segfault when main exits.

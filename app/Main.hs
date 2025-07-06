@@ -171,7 +171,8 @@ compile (Module _ functions) filename =
   let (fnTexts, state) = runState (mapM compileFunction functions) emptyCompileState
       stringDecls = compileStringDecls (strings state)
       textSection = [Directive "section" [".text"]]
-  in stringDecls ++ textSection ++ concat fnTexts
+      externs = [Directive "extern" ["puts"]]
+  in externs ++ stringDecls ++ textSection ++ concat fnTexts
 
 compileStringDecls :: Map String String -> [ASM]
 compileStringDecls strs =

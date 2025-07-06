@@ -242,12 +242,23 @@ compileStatement statement = case statement of
   Block statements ->
     concatMapM compileStatement statements
 
+-- returns the variable name that holds the string
+addString :: String -> Compiler String
+addString string = do
+  state <- get
+  let strs = strings state
+  let name = "str" ++ show (length strs)
+  let strs' = Map.insert name string strs
+  put (state { strings = strs' })
+  return name
 
 compileExpression :: Expression -> Compiler [Instr]
 compileExpression expression = case expression of
   Literal value -> case value of
-    VInt i    -> return [Mov (Register8 $ RAX) (Immediate i)]
-    VString s -> undefined -- TODO
+    VInt i    -> return [Mov (Register8 RAX) (Immediate i)]
+    VString s -> do
+      varname <- addString s
+      return [Mov (Register8 RAX) (Address varname)]
   Variable name ->
     -- TODO: look up where this variable or argument is stored
     undefined

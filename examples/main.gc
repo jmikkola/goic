@@ -1,5 +1,5 @@
 module main
 
 func main() Void {
-	println("Hello, world!")
+	puts("Hello, world!")
 }

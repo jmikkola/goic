@@ -1,7 +1,7 @@
 module main
 
 func main() Void {
-	println("Hello, world!")
+	puts("Hello, world!")
 }
 
 func add(a Int, b Int) Int {

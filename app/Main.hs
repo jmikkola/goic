@@ -1,6 +1,6 @@
 module Main where
 
--- import Control.Monad.Extra (concatMapM)
+import Control.Monad.Extra (concatMapM)
 import Control.Monad.State (StateT, State, get, put, lift, evalStateT, runStateT, runState)
 import Data.Char (toLower)
 import Data.Map (Map)
@@ -72,11 +72,11 @@ data ASM
 
 data Instr
   = Push Arg
-  | Movq Arg Arg
-  | Movl Arg Arg
-  | Addq Arg Arg
-  | Subq Arg Arg
   | Pop Arg
+  | Mov Arg Arg
+  | Add Arg Arg
+  | Sub Arg Arg
+  | CallI Arg
   | Ret
   deriving (Show)
 
@@ -128,13 +128,13 @@ instance Render Arg where
 
 instance Render Instr where
   render instr = case instr of
-    Ret      -> "ret"
-    Pop  arg -> "popq\t" ++ render arg
-    Push arg -> "pushq\t" ++ render arg
-    Movq a b -> "movq\t" ++ render a ++ ", " ++ render b
-    Movl a b -> "movl\t" ++ render a ++ ", " ++ render b
-    Addq a b -> "addq\t" ++ render a ++ ", " ++ render b
-    Subq a b -> "subq\t" ++ render a ++ ", " ++ render b
+    Ret       -> "ret"
+    Pop  arg  -> "pop\t" ++ render arg
+    Push arg  -> "push\t" ++ render arg
+    Mov a b   -> "mov\t" ++ render a ++ ", " ++ render b
+    Add a b   -> "add\t" ++ render a ++ ", " ++ render b
+    Sub a b   -> "sub\t" ++ render a ++ ", " ++ render b
+    CallI arg -> "call\t" ++ render arg
 
 instance Render ASM where
   render (Instruction instr)   = "\t" ++ render instr
@@ -207,13 +207,13 @@ compileBody t argNames body = do
 functionPrologue :: [Instr]
 functionPrologue =
   [ Push $ Register8 $ RBP
-  , Movq (Register8 $ RBP) (Register8 $ RSP)
+  , Mov (Register8 $ RBP) (Register8 $ RSP)
   ]
 
 -- TODO: support optionally restoring some callee-saved registers
 functionEpilogue :: [Instr]
 functionEpilogue =
-  [ Movq (Register8 $ RSP) (Register8 $ RBP)
+  [ Mov (Register8 $ RSP) (Register8 $ RBP)
   , Pop $ Register8 $ RBP
   ]
 
@@ -239,15 +239,14 @@ compileStatement statement = case statement of
   While test body ->
     -- TODO: add code to handle while
     undefined
-  Block statements -> do
-    statementInstrs <- mapM compileStatement statements
-    return $ concat statementInstrs
+  Block statements ->
+    concatMapM compileStatement statements
 
 
 compileExpression :: Expression -> Compiler [Instr]
 compileExpression expression = case expression of
   Literal value -> case value of
-    VInt i    -> return [Movq (Register8 $ RAX) (Immediate i)]
+    VInt i    -> return [Mov (Register8 $ RAX) (Immediate i)]
     VString s -> undefined -- TODO
   Variable name ->
     -- TODO: look up where this variable or argument is stored
@@ -258,21 +257,56 @@ compileExpression expression = case expression of
     return $ concat [ leftInstrs
                     , [Push $ Register8 RAX]
                     , rightInstrs
-                    , [ Movq (Register8 RBX) (Register8 RAX)
+                    , [ Mov (Register8 RBX) (Register8 RAX)
                       , Pop $ Register8 RAX
                       ]
                     , compileOp op
                     ]
   Paren inner -> compileExpression inner
-  Call (Variable fnName) args ->
-    undefined -- TODO: compute args in order, flip order in the stack, pop the
-              -- first 6 into registers, emit the call instruction
+  Call (Variable fnName) args -> do
+    compileCall fnName args
   _ -> undefined
+
+argRegisters :: [Reg8]
+argRegisters = [RDI, RSI, RDX, RCX, R8, R9]
+
+compileCall :: String -> [Expression] -> Compiler [Instr]
+compileCall fnName []   =
+  return [CallI (Address fnName)]
+compileCall fnName args = do
+  let nArgs = length args
+  -- Push all N arguments on to the stack, left to right
+  argInstrs <- concatMapM compileArg args
+
+  -- TODO: repush the 7th and following arguments
+  if nArgs > 6
+    then error "can't handle more than 6 args yet"
+    else return ()
+
+  -- Fill the argument-passing registers with the values from the stack
+  let regFill =
+        [ Mov (Register8 r) (R8Offset (i * 8) RSP)
+        | (r, i) <- zip argRegisters (reverse [0..nArgs - 1])
+        ]
+
+  -- TODO: Save caller saved registers
+  let call = [CallI (Address fnName)]
+  -- TODO: Restore caller saved registers
+
+  -- TODO: Also pop 7th and following args
+  let cleanup = [Sub (Register8 RSP) (Immediate $ nArgs * 8)]
+
+  return $ argInstrs ++ regFill ++ call ++ cleanup
+
+compileArg :: Expression ->  Compiler [Instr]
+compileArg argExpr = do
+  compiled <- compileExpression argExpr
+  return $ compiled ++ [Push (Register8 RAX)]
 
 
 compileOp :: Op -> [Instr]
-compileOp Plus = [Addq (Register8 RAX) (Register8 RBX)]
-compileOp Minus = [Subq (Register8 RAX) (Register8 RBX)]
+compileOp Plus = [Add (Register8 RAX) (Register8 RBX)]
+compileOp Minus = [Sub (Register8 RAX) (Register8 RBX)]
 compileOp _ = undefined -- TODO
 
 
@@ -301,7 +335,7 @@ data Source = Builtin | FnDecl | Argument | Local
 type Names = [(String, (Type, Source))]
 
 builtins :: Names
-builtins = [("println", (Func $ FnType [String] Void, Builtin))]
+builtins = [("puts", (Func $ FnType [String] Void, Builtin))]
 
 checkModule :: Module -> Either Err ()
 checkModule (Module _ functions) = do

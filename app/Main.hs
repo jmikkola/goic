@@ -179,7 +179,7 @@ compile (Module _ functions) filename =
 
 constants :: [ASM]
 constants =
-  [ Constant "SYS_exit" "equ" "1"
+  [ Constant "SYS_exit" "equ" "60"
   , Constant "EXIT_SUCCESS" "equ" "0" ]
 
 defineStart :: [ASM]

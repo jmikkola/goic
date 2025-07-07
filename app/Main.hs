@@ -80,6 +80,7 @@ data Instr
   | Sub Arg Arg
   | CallI Arg
   | Ret
+  | Syscall
   deriving (Eq, Show)
 
 data Arg
@@ -137,6 +138,7 @@ instance Render Instr where
     Add a b   -> "add\t" ++ render a ++ ", " ++ render b
     Sub a b   -> "sub\t" ++ render a ++ ", " ++ render b
     CallI arg -> "call\t" ++ render arg
+    Syscall   -> "syscall"
 
 instance Render ASM where
   render (Instruction instr)     = "\t" ++ render instr
@@ -169,17 +171,31 @@ emptyCompileState =
 compile :: Module -> String -> [ASM]
 compile (Module _ functions) filename =
   let (fnTexts, state) = runState (mapM compileFunction functions) emptyCompileState
+      dataSection = [Directive "section" [".data"]]
       stringDecls = compileStringDecls (strings state)
       textSection = [Directive "section" [".text"]]
       externs = [Directive "extern" ["puts"]]
-  in externs ++ stringDecls ++ textSection ++ concat fnTexts
+  in externs ++ dataSection ++ constants ++ stringDecls ++ textSection ++ defineStart ++ concat fnTexts
+
+constants :: [ASM]
+constants =
+  [ Constant "SYS_exit" "equ" "1"
+  , Constant "EXIT_SUCCESS" "equ" "0" ]
+
+defineStart :: [ASM]
+defineStart =
+  let callMain = [Instruction $ CallI $ Address "main"]
+      exitSuccess =
+        [ Instruction $ Mov (Register8 RAX) (Address "SYS_exit")
+        , Instruction $ Mov (Register8 RDI) (Address "EXIT_SUCCESS")
+        , Instruction $ Syscall
+        ]
+  in functionPreamble "_start" ++ callMain ++ exitSuccess
 
 compileStringDecls :: Map String String -> [ASM]
 compileStringDecls strs =
-  let pairs = Map.toList strs
-      values = [ Constant name "db" (show value)
-               | (name, value) <- pairs ]
-  in [Directive "section" [".data"]] ++ values
+  [ Constant name "db" (show value)
+  | (name, value) <- Map.toList strs ]
 
 compileFunction :: Function -> Compiler [ASM]
 compileFunction (Function name t argNames body) = do
@@ -309,7 +325,7 @@ compileCall fnName args = do
   -- TODO: Restore caller saved registers
 
   -- TODO: Also pop 7th and following args
-  let cleanup = [Sub (Register8 RSP) (Immediate $ nArgs * 8)]
+  let cleanup = [Add (Register8 RSP) (Immediate $ nArgs * 8)]
 
   return $ argInstrs ++ regFill ++ call ++ cleanup
 

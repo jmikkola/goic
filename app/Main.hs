@@ -20,9 +20,16 @@ main = getArgs >>= parseArgs >>= runForName
 
 runForName :: String -> IO ()
 runForName filename = do
+  let name = trimExtension filename
   parsedModule <- readFile filename >>= parseFile >>= checkFile
   let compiled = compile parsedModule filename
-  putStrLn $ render compiled
+  writeFile (name ++ ".asm") (render compiled)
+  assemble name
+  link name
+  -- putStrLn $ render compiled
+
+trimExtension :: String -> String
+trimExtension = takeWhile (/= '.')
 
 putErrLn :: String -> IO ()
 putErrLn = hPutStrLn stderr
@@ -43,6 +50,32 @@ parseFile content =
     Right result -> do
       return result
 
+assemble :: String -> IO ()
+assemble name =
+  let args = [ "-Worphan-labels"
+             , "-g"
+             , "dwarf2"
+             , "-f"
+             , "elf64"
+             , name ++ ".asm"
+             , "-o"
+             , name ++ ".o"
+             ]
+  in runSubprocess "yasm" args
+
+link :: String -> IO ()
+link name =
+  let args = [ "-g"
+             , "-o"
+             , name
+             , name ++ ".o"
+             , "-lc"
+             , "--dynamic-linker"
+             , "/lib64/ld-linux-x86-64.so.2"
+             , "-e"
+             , "_start"
+             ]
+  in runSubprocess "ld" args
 
 --
 -- Process utility

@@ -52,7 +52,7 @@ extra-doc-files:    CHANGELOG.md
 -- extra-source-files:
 
 common warnings
-    ghc-options: -Wall
+    ghc-options: -Wall -Wno-name-shadowing -Wno-unused-matches
 
 executable goic
     -- Import common warning flags.
@@ -75,4 +75,3 @@ executable goic
 
     -- Base language which the package is written in.
     default-language: GHC2021
-ghc-options: -Wname-shadowing

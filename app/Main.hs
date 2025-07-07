@@ -80,7 +80,7 @@ data Instr
   | Sub Arg Arg
   | CallI Arg
   | Ret
-  deriving (Show)
+  deriving (Eq, Show)
 
 data Arg
   = Immediate Int
@@ -97,13 +97,13 @@ data Arg
   -- | R4Index Reg4 Reg4
   -- | R4Scaled Reg4 Reg4 Int
   -- | R4Offset Int Reg4 Reg4 Int
-  deriving (Show)
+  deriving (Eq, Show)
 
 data Reg8 = RAX | RBX | RCX | RDX | RSI | RDI | RSP | RBP | R8 | R9 | R10 | R11 | R12 | R13 | R14 | R15
-  deriving (Show)
+  deriving (Eq, Show)
 
 data Reg4 = EAX | EBX | ECX | EDX | ESI | EDI | ESP | EBP
-  deriving (Show)
+  deriving (Eq, Show)
 
 
 class Render a where
@@ -194,12 +194,6 @@ compileFunction (Function name t argNames body) = do
   return (preamble ++ asm)
 
 functionPreamble :: String -> [ASM]
-functionPreamble "main" =
-  [ Directive "global" ["main"]
-  , Label "main"
-  , Directive "global" ["_start"]
-  , Label "_start"
-  ]
 functionPreamble name =
   [ Directive "global" [name]
   , Label name
@@ -208,7 +202,8 @@ functionPreamble name =
 compileBody :: FnType -> [String] -> Statement -> Compiler [ASM]
 compileBody t argNames body = do
   compiledBody <- compileStatement body
-  let instructions = functionPrologue ++ compiledBody ++ functionEpilogue
+  let end = if (take 1 $ reverse compiledBody) == [Ret] then [] else [Ret]
+  let instructions = functionPrologue ++ compiledBody ++ functionEpilogue ++ end
   return $ map Instruction instructions
 
 -- TODO: support optionally saving some callee-saved registers
@@ -223,17 +218,16 @@ functionEpilogue :: [Instr]
 functionEpilogue =
   [ Mov (Register8 $ RSP) (Register8 $ RBP)
   , Pop $ Register8 $ RBP
-  , Ret
   ]
 
 compileStatement :: Statement -> Compiler [Instr]
 compileStatement statement = case statement of
   EStatement expr -> compileExpression expr
-  -- TODO: these returns also need the function epilogue
   Return     expr -> do
     exprInstrs <- compileExpression expr
-    return $ exprInstrs ++ [Ret]
-  BareReturn      -> return [Ret]
+    return $ exprInstrs ++ functionEpilogue ++ [Ret]
+  BareReturn      ->
+    return $ functionEpilogue ++ [Ret]
   NewVar name t expr ->
     -- TODO: determine where on the stack `name` lives
     -- also reserve space on the stack for it

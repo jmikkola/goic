@@ -3,6 +3,7 @@ module Main where
 import Control.Monad.Extra (concatMapM)
 import Control.Monad.State (StateT, State, get, put, lift, evalStateT, runStateT, runState)
 import Data.Char (toLower)
+import Data.List (elemIndex)
 import Data.Map (Map)
 import qualified Data.Map as Map
 import System.Environment (getArgs)
@@ -313,8 +314,7 @@ compileExpression expression = case expression of
       varname <- addString s
       return [Mov (Register8 RAX) (Address varname)]
   Variable name ->
-    -- TODO: look up where this variable or argument is stored
-    undefined
+    compileVariable name
   BinaryOp op left right -> do
     leftInstrs <- compileExpression left
     rightInstrs <- compileExpression right
@@ -330,6 +330,16 @@ compileExpression expression = case expression of
   Call (Variable fnName) args -> do
     compileCall fnName args
   _ -> undefined
+
+compileVariable :: String -> Compiler [Instr]
+compileVariable name = do
+  state <- get
+  case elemIndex name (argNames state) of
+    Just idx ->
+      if idx < 6
+      then return [Mov (Register8 RAX) (Register8 $ argRegisters !! idx)]
+      else error "todo: handle more than 6 args"
+    Nothing  -> error "todo: handle local variables"
 
 argRegisters :: [Reg8]
 argRegisters = [RDI, RSI, RDX, RCX, R8, R9]

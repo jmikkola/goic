@@ -112,6 +112,7 @@ data Instr
   | Mov Arg Arg
   | Add Arg Arg
   | Sub Arg Arg
+  | Mul Arg
   | CallI Arg
   | Ret
   | Syscall
@@ -171,6 +172,7 @@ instance Render Instr where
     Mov a b   -> "mov\t" ++ render a ++ ", " ++ render b
     Add a b   -> "add\t" ++ render a ++ ", " ++ render b
     Sub a b   -> "sub\t" ++ render a ++ ", " ++ render b
+    Mul a     -> "mul\t" ++ render a
     CallI arg -> "call\t" ++ render arg
     Syscall   -> "syscall"
 
@@ -379,9 +381,11 @@ compileArg argExpr = do
 
 
 compileOp :: Op -> [Instr]
-compileOp Plus = [Add (Register8 RAX) (Register8 RBX)]
+compileOp Plus  = [Add (Register8 RAX) (Register8 RBX)]
 compileOp Minus = [Sub (Register8 RAX) (Register8 RBX)]
-compileOp _ = undefined -- TODO
+-- TODO: `mul` always writes to rdx, meaning an arg in that register gets clobbered
+compileOp Times = [Mul (Register8 RBX)]
+compileOp op    = error $ "todo: handle op " ++ show op
 
 
 join :: String -> [String] -> String

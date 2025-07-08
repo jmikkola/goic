@@ -10,29 +10,10 @@ The eventual goal is to try to learn x86_64 assembly.
 
 ## Next
 
-- Fix linking
+- Get enough working for a fib() function
 - Variables
+- Add loops
+- Add char-by-char output
 - Other math instructions
 - Function calls
-- Control flow
-
-## Assembling and Linking
-
-Assembler command:
-
-    yasm -Worphan-labels -g dwarf2 -f elf64 main.asm
-
-Link command:
-
-    ld -g -o main main.o -lc --dynamic-linker /lib64/ld-linux-x86-64.so.2 -e _start
-
-It seems like it needs
-
-```
-    ;; exit
-    mov rax, SYS_exit
-    mov rdi, EXIT_SUCCESS
-    syscall
-```
-
-at the end to not segfault when main exits.
+- Add a small stdlib?

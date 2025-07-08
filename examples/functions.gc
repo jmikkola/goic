@@ -4,18 +4,18 @@ func main() Void {
 	puts("Hello, world!")
 }
 
-func add(a Int, b Int) Int {
+func add2(a Int, b Int) Int {
     return a + b
 }
 
 func f1() Void {
-  add(1, 2)
+  add2(1, 2)
 }
 
 func f2() Void {
-  add(add(1, 2), add(3, 4))
+  add2(add2(1, 2), add2(3, 4))
 }
 
 func f3() Void {
-  add(2 * 3, 10 - 9 - 8)
+  add2(2 * 3, 10 - 9 - 8)
 }

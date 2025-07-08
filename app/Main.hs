@@ -883,10 +883,14 @@ ifParser = do
   anyLinearWhitespace
   body <- block
   any1LinearWhitespace
-  string "else"
-  any1LinearWhitespace
-  elseBody <- block
-  return $ If condition body elseBody
+  else_ <- optional (string "else")
+  case else_ of
+    Nothing ->
+      return $ If condition body (Block [])
+    Just _  -> do
+      any1LinearWhitespace
+      elseBody <- block
+      return $ If condition body elseBody
 
 newVar :: Parser Statement
 newVar = do

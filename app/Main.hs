@@ -587,6 +587,12 @@ data Op
     | Divide
     | And
     | Or
+    | Greater
+    | Less
+    | Equal
+    | GEqual
+    | LEqual
+    | NotEqual
     deriving (Eq, Show)
 
 data FnType = FnType [Type] Type
@@ -609,12 +615,18 @@ instance Render Value where
 
 instance Render Op where
   render op = case op of
-    Plus   -> "+"
-    Minus  -> "-"
-    Times  -> "*"
-    Divide -> "/"
-    And    -> "and"
-    Or     -> "or"
+    Plus     -> "+"
+    Minus    -> "-"
+    Times    -> "*"
+    Divide   -> "/"
+    And      -> "and"
+    Or       -> "or"
+    Greater  -> ">"
+    Less     -> "<"
+    Equal    -> "=="
+    GEqual   -> ">="
+    LEqual   -> "<="
+    NotEqual -> "!="
 
 
 --
@@ -1054,8 +1066,8 @@ valueParser = options [intValue, stringValue]
 
 opParser :: Parser Op
 opParser = options $ zipWith opOption names values
-  where names = ["+", "-", "*", "/", "and", "or"]
-        values = [Plus, Minus, Times, Divide, And, Or]
+  where names = ["+", "-", "*", "/", "and", "or", ">", "<", "==", ">=", "<=", "!="]
+        values = [Plus, Minus, Times, Divide, And, Or, Greater, Less, Equal, GEqual, LEqual, NotEqual]
         opOption s o = do
           string s
           return o

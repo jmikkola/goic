@@ -585,6 +585,7 @@ data Op
     | Minus
     | Times
     | Divide
+    | Mod
     | And
     | Or
     | Greater
@@ -619,6 +620,7 @@ instance Render Op where
     Minus    -> "-"
     Times    -> "*"
     Divide   -> "/"
+    Mod      -> "%"
     And      -> "and"
     Or       -> "or"
     Greater  -> ">"
@@ -1002,10 +1004,12 @@ unfoldOps _ _ = error "invalid call"
 
 precOrder :: [[Op]]
 precOrder =
-  [ [Times, Divide]
+  [ [Times, Divide, Mod]
   , [Plus, Minus]
   , [Or]
   , [And]
+  , [Greater, Less, GEqual, LEqual]
+  , [Equal, NotEqual]
   ]
 
 unaryExpression :: Parser Expression
@@ -1066,8 +1070,8 @@ valueParser = options [intValue, stringValue]
 
 opParser :: Parser Op
 opParser = options $ zipWith opOption names values
-  where names = ["+", "-", "*", "/", "and", "or", ">", "<", "==", ">=", "<=", "!="]
-        values = [Plus, Minus, Times, Divide, And, Or, Greater, Less, Equal, GEqual, LEqual, NotEqual]
+  where names = ["+", "-", "*", "/", "%", "and", "or", ">", "<", "==", ">=", "<=", "!="]
+        values = [Plus, Minus, Times, Divide, Mod, And, Or, Greater, Less, Equal, GEqual, LEqual, NotEqual]
         opOption s o = do
           string s
           return o

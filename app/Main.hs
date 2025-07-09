@@ -260,6 +260,8 @@ compileFunction (Function name t argNames body) = do
   state <- get
   put (state { argNames = argNames, localVars = Map.empty })
   let preamble = functionPreamble name
+  -- TODO: Save caller-saved registers (e.g. stack variables) if those registers
+  -- will get used during the function body
   asm <- compileBody t argNames body
   -- Clear the function-specific parts of the state
   state' <- get

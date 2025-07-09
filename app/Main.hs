@@ -12,6 +12,26 @@ import System.Exit (exitFailure)
 import System.Process (createProcess, proc, waitForProcess)
 import System.Exit (ExitCode(..))
 
+import Text.Parsec ( many
+                   , try
+                   , eof
+                   , choice
+                   , oneOf
+                   , option
+                   , sepEndBy
+                   , char
+                   , optional
+                   , letter
+                   , alphaNum
+                   , parse
+                   , (<|>)
+                   , SourceName
+                   )
+import Text.Parsec.String (Parser)
+import Text.Parsec.Expr
+import Text.Parsec.Language (emptyDef)
+import qualified Text.Parsec.Token as Token
+
 --
 -- Top-level, IO functions
 --
@@ -22,7 +42,7 @@ main = getArgs >>= parseArgs >>= runForName
 runForName :: String -> IO ()
 runForName filename = do
   let name = trimExtension filename
-  parsedModule <- readFile filename >>= parseFile >>= checkFile
+  parsedModule <- readFile filename >>= parseFile filename >>= checkFile
   let compiled = compile parsedModule filename
   writeFile (name ++ ".asm") (render compiled)
   assemble name
@@ -41,12 +61,12 @@ parseArgs _   = do
   putErrLn "Usage: goic [filename.gc]"
   exitFailure
 
-parseFile :: String -> IO Module
-parseFile content =
-  case parse moduleParser content of
+parseFile :: SourceName -> String -> IO Module
+parseFile filename content =
+  case parse moduleParser filename content of
     Left err -> do
       putErrLn "Error parsing file:"
-      putErrLn err
+      putErrLn (show err)
       exitFailure
     Right result -> do
       return result
@@ -412,6 +432,8 @@ data Source = Builtin | FnDecl | Argument | Local
 
 type Names = [(String, (Type, Source))]
 
+type Err = String
+
 builtins :: Names
 builtins = [("puts", (Func $ FnType [String] Void, Builtin))]
 
@@ -635,443 +657,164 @@ instance Render Op where
 -- Parser for the basic language
 --
 
-type Err = String
-type ParseM = StateT String (Either Err)
-type Parser a = ParseM a
+langDef :: Token.LanguageDef ()
+langDef = emptyDef
+    { Token.identStart      = letter
+    , Token.identLetter     = alphaNum <|> char '_'
+    , Token.opStart         = oneOf "+-*/%<>=!&|"
+    , Token.opLetter        = oneOf "+-*/%<>=!&|"
+    , Token.reservedNames   = ["module", "func", "return", "while", "if", "else", "var", "Void", "Int", "String", "Char", "Fn"]
+    , Token.reservedOpNames = ["+", "-", "*", "/", "%", "and", "or", ">", "<", "==", ">=", "<=", "!="]
+    }
 
-parse :: Parser a -> String -> Either Err a
-parse p text = evalStateT p text
+lexer :: Token.TokenParser ()
+lexer = Token.makeTokenParser langDef
 
-eof :: Parser ()
-eof = do
-  text <- get
-  if text == ""
-    then return ()
-    else _err $ "Expected eof, got " ++ (take 100 text)
+-- Lexer helper functions
+identifier    = Token.identifier lexer
+reserved      = Token.reserved lexer
+reservedOp    = Token.reservedOp lexer
+parens        = Token.parens lexer
+braces        = Token.braces lexer
+commaSep      = Token.commaSep lexer
+whiteSpace    = Token.whiteSpace lexer
+integer       = Token.integer lexer
+stringLiteral = Token.stringLiteral lexer
 
-_parsed :: a -> String -> Parser a
-_parsed p current = do
-  put current
-  return p
-
-_err :: String -> Parser a
-_err = lift . Left
-
-
-char :: Char -> Parser ()
-char c = do
-  text <- get
-  discard $ case text of
-    (c2:rest) | c == c2 -> _parsed c rest
-    _                   -> _err $ "Cannot match char " ++ [c]
-
-
--- string :: String -> Parser String
--- string s = do
---   _string s
---   return s
-
-string :: String -> Parser ()
-string [] = return ()
-string (c:cs) = do
-  char c
-  string cs
-
-oneOf :: [Char] -> Parser Char
-oneOf opts = do
-  text <- get
-  case text of
-    (c:rest) | elem c opts -> _parsed c rest
-    _                      -> _err $ "Cannot match any of " ++ opts
-
-
-noneOf :: [Char] -> Parser Char
-noneOf opts = do
-  text <- get
-  case text of
-    (c:rest) | not (elem c opts) -> _parsed c rest
-    _                            -> _err $ "Character was one of " ++ opts
-
-
-optional :: Parser a -> Parser (Maybe a)
-optional p = do
-  text <- get
-  let result = runStateT p text
-  case result of
-    Left  _         -> return Nothing
-    Right (r, rest) -> _parsed (Just r) rest
-
-many :: Parser a -> Parser [a]
-many p = do
-  parsed <- optional p
-  case parsed of
-    Nothing -> return []
-    Just x -> do
-      more <- many p
-      return (x : more)
-
-many1 :: Parser a -> Parser [a]
-many1 p = do
-  parsed <- p
-  more <- many p
-  return (parsed : more)
-
-manySepBy :: Parser a -> Parser b -> Parser [a]
-manySepBy p sep = do
-  parsed <- optional p
-  case parsed of
-    Nothing -> return []
-    Just x  -> do
-      more <- many $ do
-        discard sep
-        p
-      return (x : more)
-
-options :: [Parser a] -> Parser a
-options parsers = tryOption parsers
-  where tryOption []     = _err "no parsers given to options"
-        tryOption [p]    = p
-        tryOption (p:ps) = do
-          -- save the current value of text
-          text <- get
-          let result = runStateT p text
-          case result of
-            Left _  -> do
-              -- that parser failed, so restore the value of text before trying the next one
-              put text
-              tryOption ps
-            Right (r, text') -> do
-              put text'
-              return r
-
--- this succeeds if the given parser fails
-non :: Parser a -> Parser ()
-non p = do
-  text <- get
-  let result = runStateT p text
-  case result of
-    Left _ -> do
-      put text
-      return ()
-    Right _ ->
-      _err "inner parser succeeded"
-
-digit :: Parser Char
-digit = oneOf ['0' .. '9']
-
-digits :: Parser String
-digits = many1 digit
-
-letter :: Parser Char
-letter = oneOf (['a'..'z'] ++ ['A'..'Z'])
-
-letters :: Parser String
-letters = many1 letter
-
-alphaNum :: Parser Char
-alphaNum = oneOf (['a'..'z'] ++ ['A'..'Z'] ++ ['0' .. '9'] ++ ['_'])
-
--- zero or more whitespace characters, not including newlines
-anyLinearWhitespace :: Parser ()
-anyLinearWhitespace = discard $ many $ oneOf " \t"
-
--- one or more whitespace characters, not including newlines
-any1LinearWhitespace :: Parser ()
-any1LinearWhitespace = discard $ many1 $ oneOf " \t"
-
--- zero or more whitespace characters, including newlines
-anyWhitespace :: Parser ()
-anyWhitespace = discard $ many $ oneOf " \t\n"
-
--- Ignore the results of a parser in a way that doesn't trigger a compiler warning
-discard :: Parser a -> Parser ()
-discard p = do
-  _ <- p
-  return ()
-
-----
-
-nameParser :: Parser String
-nameParser = do
-  first <- letter
-  rest <- many alphaNum
-  return $ first : rest
-
+-- Module Parser
 moduleParser :: Parser Module
 moduleParser = do
-  anyWhitespace
-  string "module"
-  any1LinearWhitespace
-  name <- nameParser
-  char '\n'
-  anyWhitespace
+    whiteSpace
+    reserved "module"
+    name <- identifier
+    functions <- many (try function)
+    eof
+    return $ Module name functions
 
-  functions <- manySepBy function functionSep
-
-  anyWhitespace
-  eof
-
-  return $ Module name functions
-
-functionSep :: Parser ()
-functionSep = do
-  anyLinearWhitespace
-  char '\n'
-  anyWhitespace
-  return ()
-
+-- Function Parser
 function :: Parser Function
 function = do
-  string "func"
-  any1LinearWhitespace
-
-  name <- nameParser
-  char '('
-  anyWhitespace
-  typedArgs <- manySepBy typedArg argSeparator
-  anyWhitespace
-  char ')'
-
-  any1LinearWhitespace
-  returnType <- typeParser
-  any1LinearWhitespace
-
-  body <- block
-
-  let (argNames, argTypes) = unzip typedArgs
-  let t = FnType argTypes returnType
-  return $ Function name t argNames body
+    reserved "func"
+    name <- identifier
+    typedArgs <- parens (commaSep typedArg)
+    returnType <- typeParser
+    body <- block
+    let (argNames, argTypes) = unzip typedArgs
+    let t = FnType argTypes returnType
+    return $ Function name t argNames body
 
 typedArg :: Parser (String, Type)
 typedArg = do
-  name <- nameParser
-  any1LinearWhitespace
-  t <- typeParser
-  return (name, t)
+    name <- identifier
+    t <- typeParser
+    return (name, t)
 
+-- Statement Parsers
 statement :: Parser Statement
-statement = do
-  anyLinearWhitespace
-  options [block, returnParser, bareReturn, while, ifParser, newVar, assign, exprStatement]
+statement = choice
+    [ try block
+    , try returnParser
+    , try bareReturn
+    , try while
+    , try ifParser
+    , try newVar
+    , try assign
+    , EStatement <$> expression
+    ]
 
 block :: Parser Statement
-block = do
-  char '{'
-  char '\n'
-  statements <- manySepBy statement (char '\n')
-  anyLinearWhitespace
-  if null statements
-    then anyWhitespace
-    else do
-      char '\n'
-      anyWhitespace
-  char '}'
-  return $ Block statements
+block = Block <$> braces (sepEndBy statement (optional $ char '\n'))
 
 returnParser :: Parser Statement
 returnParser = do
-  string "return"
-  anyLinearWhitespace
-  e <- expression
-  return $ Return e
+    reserved "return"
+    Return <$> expression
 
 bareReturn :: Parser Statement
-bareReturn = do
-  string "return"
-  return $ BareReturn
+bareReturn = reserved "return" >> return BareReturn
 
 while :: Parser Statement
 while = do
-  string "while"
-  any1LinearWhitespace
-  condition <- expression
-  anyLinearWhitespace
-  body <- block
-  return $ While condition body
+    reserved "while"
+    condition <- expression
+    body <- block
+    return $ While condition body
 
 ifParser :: Parser Statement
 ifParser = do
-  string "if"
-  any1LinearWhitespace
-  condition <- expression
-  anyLinearWhitespace
-  body <- block
-  any1LinearWhitespace
-  else_ <- optional (string "else")
-  case else_ of
-    Nothing ->
-      return $ If condition body (Block [])
-    Just _  -> do
-      any1LinearWhitespace
-      elseBody <- block
-      return $ If condition body elseBody
+    reserved "if"
+    condition <- expression
+    body <- block
+    else_ <- option (Block []) $ do
+        reserved "else"
+        block <|> ifParser -- allows for "else if"
+    return $ If condition body else_
 
 newVar :: Parser Statement
 newVar = do
-  string "var"
-  any1LinearWhitespace
-  varName <- nameParser
-  any1LinearWhitespace
-  varType <- typeParser
-  any1LinearWhitespace
-  char '='
-  any1LinearWhitespace
-  value <- expression
-  return $ NewVar varName varType value
+    reserved "var"
+    varName <- identifier
+    varType <- typeParser
+    reservedOp "="
+    value <- expression
+    return $ NewVar varName varType value
 
 assign :: Parser Statement
 assign = do
-  varName <- nameParser
-  any1LinearWhitespace
-  char '='
-  any1LinearWhitespace
-  value <- expression
-  return $ Assign varName value
+    varName <- identifier
+    reservedOp "="
+    value <- expression
+    return $ Assign varName value
 
-exprStatement :: Parser Statement
-exprStatement = do
-  expr <- expression
-  return $ EStatement expr
-
+-- Type Parsers
 typeParser :: Parser Type
-typeParser = options [voidType, intType, stringType, charType, funcType]
-
-voidType :: Parser Type
-voidType = do
-  string "Void"
-  return Void
-
-intType :: Parser Type
-intType = do
-  string "Int"
-  return Int
-
-stringType :: Parser Type
-stringType = do
-  string "String"
-  return String
-
-charType :: Parser Type
-charType = do
-  string "Char"
-  return Char
+typeParser = choice
+    [ reserved "Void"   >> return Void
+    , reserved "Int"    >> return Int
+    , reserved "String" >> return String
+    , reserved "Char"   >> return Char
+    , funcType
+    ]
 
 funcType :: Parser Type
 funcType = do
-  string "Fn("
-  args <- manySepBy typeParser argSeparator
-  char ')'
-  any1LinearWhitespace
-  retType <- typeParser
-  return $ Func $ FnType args retType
+    reserved "Fn"
+    args <- parens (commaSep typeParser)
+    retType <- typeParser
+    return $ Func $ FnType args retType
 
+-- Expression Parsers
 expression :: Parser Expression
-expression = binaryExpression
+expression = buildExpressionParser operatorTable term
 
-binaryExpression :: Parser Expression
-binaryExpression = do
-  (expressions, ops) <- readBinExprParts
-  return $ unfoldParts expressions ops
+operatorTable =
+    [ [binary "*" Times AssocLeft, binary "/" Divide AssocLeft, binary "%" Mod AssocLeft]
+    , [binary "+" Plus AssocLeft, binary "-" Minus AssocLeft]
+    , [binary ">" Greater AssocNone, binary "<" Less AssocNone, binary ">=" GEqual AssocNone, binary "<=" LEqual AssocNone]
+    , [binary "==" Equal AssocNone, binary "!=" NotEqual AssocNone]
+    , [binary "and" And AssocLeft]
+    , [binary "or" Or AssocLeft]
+    ]
+    where
+      binary name op = Infix (do{ reservedOp name; return (BinaryOp op) })
 
-readBinExprParts :: Parser ([Expression], [Op])
-readBinExprParts = do
-  left <- unaryExpression
-  anyLinearWhitespace
-  parts <- many $ do
-    op <- opParser
-    anyWhitespace
-    right <- unaryExpression
-    anyLinearWhitespace
-    return (op, right)
-  let (ops, rights) = unzip parts
-  return (left : rights, ops)
-
-unfoldParts :: [Expression] -> [Op] -> Expression
-unfoldParts exprs ops =
-  case foldl unfoldOps (exprs, ops) precOrder of
-    ([result], []) -> result
-    _              -> undefined
-
-unfoldOps :: ([Expression], [Op]) -> [Op] -> ([Expression], [Op])
-unfoldOps ([e],    [])   _     = ([e], [])
-unfoldOps ([],     [])   _     = ([], [])
-unfoldOps (l:r:es, o:os) opset =
-  if elem o opset
-  then unfoldOps (BinaryOp o l r : es, os) opset
-  else let (restE, restO) = unfoldOps (r:es, os) opset
-       in (l:restE, o:restO)
-unfoldOps _ _ = error "invalid call"
-
-precOrder :: [[Op]]
-precOrder =
-  [ [Times, Divide, Mod]
-  , [Plus, Minus]
-  , [Or]
-  , [And]
-  , [Greater, Less, GEqual, LEqual]
-  , [Equal, NotEqual]
-  ]
-
-unaryExpression :: Parser Expression
-unaryExpression = options [paren, call, literal, variable]
-
-paren :: Parser Expression
-paren = do
-  char '('
-  anyWhitespace
-  inner <- expression
-  anyWhitespace
-  char ')'
-  return $ Paren inner
+term :: Parser Expression
+term = choice
+    [ try (Paren <$> parens expression)
+    , try call
+    , Literal <$> valueParser
+    , Variable <$> identifier
+    ]
 
 call :: Parser Expression
 call = do
-  -- Right now, expressions that evaluate to a function aren't supported
-  funcName <- nameParser
-  char '('
-  anyWhitespace
-  arguments <- manySepBy expression argSeparator
-  anyWhitespace
-  char ')'
-  return $ Call (Variable funcName) arguments
+    name <- identifier
+    args <- parens (commaSep expression)
+    return $ Call (Variable name) args
 
-argSeparator :: Parser ()
-argSeparator = do
-  char ','
-  anyWhitespace
-  return ()
-
-literal :: Parser Expression
-literal = do
-  val <- valueParser
-  return $ Literal val
-
-variable :: Parser Expression
-variable = do
-  name <- nameParser
-  return $ Variable name
-
-
-intValue :: Parser Value
-intValue = do
-  parsed <- digits
-  return $ VInt (read parsed)
-
-stringValue :: Parser Value
-stringValue = do
-  char '"'
-  -- todo: handle escaped strings
-  text <- many $ noneOf ['"']
-  char '"'
-  return $ VString text
-
+-- Value and Literal Parsers
 valueParser :: Parser Value
-valueParser = options [intValue, stringValue]
-
-opParser :: Parser Op
-opParser = options $ zipWith opOption names values
-  where names = ["+", "-", "*", "/", "%", "and", "or", ">", "<", "==", ">=", "<=", "!="]
-        values = [Plus, Minus, Times, Divide, Mod, And, Or, Greater, Less, Equal, GEqual, LEqual, NotEqual]
-        opOption s o = do
-          string s
-          return o
+valueParser = choice
+    [ VInt . fromInteger <$> integer
+    , VString <$> stringLiteral
+    ]

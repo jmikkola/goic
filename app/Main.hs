@@ -230,7 +230,8 @@ compile (Module _ functions) filename =
       dataSection = [Directive "section" [".data"]]
       stringDecls = compileStringDecls (strings state)
       textSection = [Directive "section" [".text"]]
-      externs = [Directive "extern" ["puts"]]
+      externs = [ Directive "extern" [name]
+                | name <- ["puts", "putc"] ]
   in externs ++ dataSection ++ constants ++ stringDecls ++ textSection ++ defineStart ++ concat fnTexts
 
 constants :: [ASM]
@@ -435,7 +436,10 @@ type Names = [(String, (Type, Source))]
 type Err = String
 
 builtins :: Names
-builtins = [("puts", (Func $ FnType [String] Void, Builtin))]
+builtins =
+  [ ("puts", (Func $ FnType [String] Void, Builtin))
+  , ("putc", (Func $ FnType [Int] Void, Builtin))
+  ]
 
 checkModule :: Module -> Either Err ()
 checkModule (Module _ functions) = do

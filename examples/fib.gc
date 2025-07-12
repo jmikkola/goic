@@ -11,7 +11,7 @@ func printint(n Int) Void {
     if n / 10 > 0 {
         printint(n / 10)
     }
-    putc(n % 10 + 48)
+    putchar(n % 10 + 48)
 }
 
 

@@ -124,16 +124,24 @@ data ASM
   | Directive String [String]
   -- name, type, value
   | Constant String String String
-  deriving (Show)
+  deriving (Eq, Show)
 
 data Instr
   = Push Arg
   | Pop Arg
   | Mov Arg Arg
+  | Movzx Arg Arg
   | Add Arg Arg
   | Sub Arg Arg
   | Mul Arg
+  | IDiv Arg
+  | Cqo
   | CallI Arg
+  | Cmp Arg Arg
+  | Setl Arg
+  | Setg Arg
+  | Jmp String
+  | Je String
   | Ret
   | Syscall
   deriving (Eq, Show)
@@ -142,17 +150,13 @@ data Arg
   = Immediate Int
   | Address String
   | Register8 Reg8
+  | Register4 Reg4
+  | Register1 Reg1
   | R8Offset Int Reg8
   | R8Address Reg8
   | R8Index Reg8 Reg8
   | R8Scaled Reg8 Reg8 Int
   | R8ScaledOffset Int Reg8 Reg8 Int
-  -- | R4 Reg4
-  -- | R4Offset Int Reg4
-  -- | R4Address Reg4
-  -- | R4Index Reg4 Reg4
-  -- | R4Scaled Reg4 Reg4 Int
-  -- | R4Offset Int Reg4 Reg4 Int
   deriving (Eq, Show)
 
 data Reg8 = RAX | RBX | RCX | RDX | RSI | RDI | RSP | RBP | R8 | R9 | R10 | R11 | R12 | R13 | R14 | R15
@@ -161,6 +165,9 @@ data Reg8 = RAX | RBX | RCX | RDX | RSI | RDI | RSP | RBP | R8 | R9 | R10 | R11 
 data Reg4 = EAX | EBX | ECX | EDX | ESI | EDI | ESP | EBP
   deriving (Eq, Show)
 
+-- this is not a complete list
+data Reg1 = AL | BL | CL | DL
+  deriving (Eq, Show)
 
 class Render a where
   render :: a -> String
@@ -168,11 +175,19 @@ class Render a where
 instance Render Reg8 where
   render reg = map toLower (show reg)
 
+instance Render Reg4 where
+  render reg = map toLower (show reg)
+
+instance Render Reg1 where
+  render reg = map toLower (show reg)
+
 instance Render Arg where
   render arg = case arg of
     Immediate n -> show n
     Address s   -> s
     Register8 r -> render r
+    Register4 r -> render r
+    Register1 r -> render r
     R8Offset       offset r ->
       "[" ++ render r ++ "+" ++ show offset ++ "]"
     R8Address             r ->
@@ -190,10 +205,18 @@ instance Render Instr where
     Pop  arg  -> "pop\t" ++ render arg
     Push arg  -> "push\t" ++ render arg
     Mov a b   -> "mov\t" ++ render a ++ ", " ++ render b
+    Movzx a b -> "movzx\t" ++ render a ++ ", " ++ render b
     Add a b   -> "add\t" ++ render a ++ ", " ++ render b
     Sub a b   -> "sub\t" ++ render a ++ ", " ++ render b
     Mul a     -> "mul\t" ++ render a
+    IDiv a    -> "idiv\t" ++ render a
+    Cqo       -> "cqo"
     CallI arg -> "call\t" ++ render arg
+    Cmp a b   -> "cmp\t" ++ render a ++ ", " ++ render b
+    Setl arg  -> "setl\t" ++ render arg
+    Setg arg  -> "setg\t" ++ render arg
+    Jmp l     -> "jmp\t" ++ l
+    Je l      -> "je\t" ++ l
     Syscall   -> "syscall"
 
 instance Render ASM where
@@ -209,6 +232,7 @@ instance Render [ASM] where
 data CompileState =
   CompileState
   { strings :: Map String String -- name to value
+  , labelsUsed :: Int
   , argNames :: [String]
   , localVars :: Map String Int -- local var offsets
   }
@@ -216,13 +240,22 @@ data CompileState =
 
 type Compiler a = State CompileState a
 
+
 emptyCompileState :: CompileState
 emptyCompileState =
   CompileState
   { strings = Map.empty
+  , labelsUsed = 0
   , argNames = []
   , localVars = Map.empty
   }
+
+newLabel :: Compiler String
+newLabel = do
+  state <- get
+  let nUsed = labelsUsed state
+  put $ state { labelsUsed = nUsed + 1 }
+  return $ "L" ++ show nUsed
 
 compile :: Module -> String -> [ASM]
 compile (Module _ functions) filename =
@@ -277,9 +310,8 @@ functionPreamble name =
 compileBody :: FnType -> [String] -> Statement -> Compiler [ASM]
 compileBody t argNames body = do
   compiledBody <- compileStatement body
-  let end = if (take 1 $ reverse compiledBody) == [Ret] then [] else [Ret]
-  let instructions = functionPrologue ++ compiledBody ++ functionEpilogue ++ end
-  return $ map Instruction instructions
+  let end = if (take 1 $ reverse compiledBody) == [Instruction Ret] then [] else [Instruction Ret]
+  return $ (map Instruction functionPrologue) ++ compiledBody ++ (map Instruction functionEpilogue) ++ end
 
 -- TODO: support optionally saving some callee-saved registers
 functionPrologue :: [Instr]
@@ -295,14 +327,18 @@ functionEpilogue =
   , Pop $ Register8 $ RBP
   ]
 
-compileStatement :: Statement -> Compiler [Instr]
+compileStatement :: Statement -> Compiler [ASM]
 compileStatement statement = case statement of
-  EStatement expr -> compileExpression expr
+  EStatement expr -> do
+    instructions <- compileExpression expr
+    return $ map Instruction instructions
   Return     expr -> do
     exprInstrs <- compileExpression expr
-    return $ exprInstrs ++ functionEpilogue ++ [Ret]
-  BareReturn      ->
-    return $ functionEpilogue ++ [Ret]
+    let instructions = exprInstrs ++ functionEpilogue ++ [Ret]
+    return $ map Instruction instructions
+  BareReturn      -> do
+    let instructions = functionEpilogue ++ [Ret]
+    return $ map Instruction instructions
   NewVar name t expr ->
     -- TODO: determine where on the stack `name` lives
     -- also reserve space on the stack for it
@@ -313,13 +349,35 @@ compileStatement statement = case statement of
     -- then compile the expression and mov the result into it
     undefined
   If expr tcase ecase ->
-    -- TODO: add code to handle ifs
-    undefined
+    compileIf expr tcase ecase
   While test body ->
     -- TODO: add code to handle while
     undefined
   Block statements ->
     concatMapM compileStatement statements
+
+-- TODO: Add a special case for an empty 'else' statement
+compileIf :: Expression -> Statement -> Statement -> Compiler [ASM]
+compileIf expr tcase ecase = do
+  elseLabel <- newLabel
+  endLabel  <- newLabel
+  testAsm  <- compileExpression expr
+  thenCase <- compileStatement tcase
+  elseCase <- compileStatement ecase
+
+  let results =
+        [ map Instruction testAsm
+        , [ Instruction $ Cmp (Register8 RAX) (Immediate 0)
+          , Instruction $ Je elseLabel
+          ]
+        , thenCase
+        , [ Instruction $ Jmp endLabel
+          , Label elseLabel
+          ]
+        , elseCase
+        , [ Label endLabel ]
+        ]
+  return $ concat results
 
 -- returns the variable name that holds the string
 addString :: String -> Compiler String
@@ -408,6 +466,21 @@ compileOp Plus  = [Add (Register8 RAX) (Register8 RBX)]
 compileOp Minus = [Sub (Register8 RAX) (Register8 RBX)]
 -- TODO: `mul` always writes to rdx, meaning an arg in that register gets clobbered
 compileOp Times = [Mul (Register8 RBX)]
+-- TODO: this always sets rdx, so the arg passed in that register needs to be saved
+compileOp Divide =
+  [ Cqo
+  , IDiv (Register8 RBX) ]
+compileOp Mod =
+  [ Cqo
+  , IDiv (Register8 RBX), Mov (Register8 RAX) (Register8 RDX) ]
+compileOp Less =
+  [ Cmp (Register8 RAX) (Register8 RBX)
+  , Setl (Register1 AL)
+  , Movzx (Register4 EAX) (Register1 AL) ]
+compileOp Greater =
+  [ Cmp (Register8 RAX) (Register8 RBX)
+  , Setg (Register1 AL)
+  , Movzx (Register4 EAX) (Register1 AL) ]
 compileOp op    = error $ "todo: handle op " ++ show op
 
 

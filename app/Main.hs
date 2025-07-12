@@ -1,7 +1,7 @@
 module Main where
 
 import Control.Monad.Extra (concatMapM)
-import Control.Monad.State (StateT, State, get, put, lift, evalStateT, runStateT, runState)
+import Control.Monad.State (State, get, put, runState)
 import Data.Char (toLower)
 import Data.List (elemIndex)
 import Data.Map (Map)

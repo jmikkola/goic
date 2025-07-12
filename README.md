@@ -17,3 +17,8 @@ The eventual goal is to try to learn x86_64 assembly.
 - Other math instructions
 - Function calls
 - Add a small stdlib?
+
+## Current
+
+Right now the fib example (and the simpler putc example) is segfaulting. Based on chatGPT, it sounds
+like this is a stack alignment issue. I'm aligning it to 8 bytes when it needs to be aligned to 16.

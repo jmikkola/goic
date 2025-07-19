@@ -8,3 +8,5 @@ goic
 *.asm
 *.o
 main
+examples/fib
+examples/putc

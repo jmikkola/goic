@@ -17,5 +17,5 @@ func printint(n Int) Void {
 
 func main() Void {
     printint(fib(10))
-    putc(10)
+    putchar(10)
 }

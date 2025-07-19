@@ -22,3 +22,5 @@ The eventual goal is to try to learn x86_64 assembly.
 
 Right now the fib example (and the simpler putc example) is segfaulting. Based on chatGPT, it sounds
 like this is a stack alignment issue. I'm aligning it to 8 bytes when it needs to be aligned to 16.
+
+Another reason that the fib example doesn't work is it uses rdi to pass the argument, but the caller doesn't preserve the register. I think this means that I should make all functions preserve their arguments to the stack and read them back from the stack.

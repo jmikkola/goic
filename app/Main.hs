@@ -359,10 +359,33 @@ compileStatement statement = case statement of
   If expr tcase ecase ->
     compileIf expr tcase ecase
   While test body ->
-    -- TODO: add code to handle while
-    undefined
+    compileWhile test body
   Block statements ->
     concatMapM compileStatement statements
+
+compileWhile :: Expression -> Statement -> Compiler [ASM]
+compileWhile test body = do
+    startLabel <- newLabel
+    endLabel   <- newLabel
+    testAsm    <- compileExpression test
+    bodyAsm    <- compileStatement body
+
+    let results =
+            [ [ Label startLabel ]
+            -- Evaluate the test condition
+            , map Instruction testAsm
+            -- Check if the result is 0 (false) and exit loop if so
+            , [ Instruction $ Cmp (Register8 RAX) (Immediate 0)
+              , Instruction $ Je endLabel
+              ]
+            -- Execute the loop body
+            , bodyAsm
+            -- Jump back to the start of the loop to re-evaluate
+            , [ Instruction $ Jmp startLabel ]
+            -- The end label to exit the loop
+            , [ Label endLabel ]
+            ]
+    return $ concat results
 
 -- TODO: Add a special case for an empty 'else' statement
 compileIf :: Expression -> Statement -> Statement -> Compiler [ASM]

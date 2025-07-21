@@ -472,9 +472,7 @@ compileArg argExpr = do
 compileOp :: Op -> [Instr]
 compileOp Plus  = [Add (Register8 RAX) (Register8 RBX)]
 compileOp Minus = [Sub (Register8 RAX) (Register8 RBX)]
--- TODO: `mul` always writes to rdx, meaning an arg in that register gets clobbered
 compileOp Times = [Mul (Register8 RBX)]
--- TODO: this always sets rdx, so the arg passed in that register needs to be saved
 compileOp Divide =
   [ Cqo
   , IDiv (Register8 RBX) ]

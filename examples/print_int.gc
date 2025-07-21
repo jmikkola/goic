@@ -1,12 +1,5 @@
 module main
 
-func fib(n Int) Int {
-    if n < 2 {
-        return n
-    }
-    return fib(n - 1) + fib(n - 2)
-}
-
 func printint(n Int) Void {
     if n / 10 > 0 {
         printint(n / 10)
@@ -14,8 +7,7 @@ func printint(n Int) Void {
     putchar(n % 10 + 48)
 }
 
-
 func main() Void {
-    printint(fib(35))
+    printint(12345)
     putchar(10)
 }

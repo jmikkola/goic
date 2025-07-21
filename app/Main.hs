@@ -307,20 +307,28 @@ functionPreamble name =
   , Label name
   ]
 
+-- TODO: support optionally saving and restoring the callee-saved registers
+--       that aren't used for arguments
 compileBody :: FnType -> [String] -> Statement -> Compiler [ASM]
 compileBody t argNames body = do
+  let prologue = map Instruction functionPrologue
+  let epilogue = map Instruction functionEpilogue
+  let saveArgs = map Instruction $ saveArguments argNames
   compiledBody <- compileStatement body
   let end = if (take 1 $ reverse compiledBody) == [Instruction Ret] then [] else [Instruction Ret]
-  return $ (map Instruction functionPrologue) ++ compiledBody ++ (map Instruction functionEpilogue) ++ end
+  return $ prologue ++ saveArgs ++ compiledBody ++ epilogue ++ end
 
--- TODO: support optionally saving some callee-saved registers
+saveArguments :: [String] -> [Instr]
+saveArguments argNames =
+  [ Push $ Register8 reg
+  | (_, reg) <- zip argNames argRegisters ]
+
 functionPrologue :: [Instr]
 functionPrologue =
   [ Push $ Register8 $ RBP
   , Mov (Register8 $ RBP) (Register8 $ RSP)
   ]
 
--- TODO: support optionally restoring some callee-saved registers
 functionEpilogue :: [Instr]
 functionEpilogue =
   [ Mov (Register8 $ RSP) (Register8 $ RBP)
@@ -420,7 +428,7 @@ compileVariable name = do
   case elemIndex name (argNames state) of
     Just idx ->
       if idx < 6
-      then return [Mov (Register8 RAX) (Register8 $ argRegisters !! idx)]
+      then return [Mov (Register8 RAX) (R8Offset ((idx + 1) * (-8)) RBP)]
       else error "todo: handle more than 6 args"
     Nothing  -> error "todo: handle local variables"
 

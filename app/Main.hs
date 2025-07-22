@@ -482,9 +482,9 @@ compileExpression expression = case expression of
                     , compileOp op
                     ]
   Paren inner -> compileExpression inner
-  Call (Variable fnName) args -> do
-    compileCall fnName args
-  _ -> undefined
+  Call function args -> case function of
+    Variable fnName -> compileCall fnName args
+    _               -> error "cannot handle function pointers yet"
 
 compileVariable :: String -> Compiler [Instr]
 compileVariable name = do

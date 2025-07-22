@@ -44,7 +44,6 @@ This depends on having `yasm` installed.
 
 ## Next
 
-- Add support for coments in goic
 - Fix stack alignment
 - Other math instructions
 - Support more than 6 arguments

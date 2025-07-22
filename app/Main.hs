@@ -816,6 +816,9 @@ langDef = emptyDef
     , Token.opLetter        = oneOf "+-*/%<>=!&|"
     , Token.reservedNames   = ["module", "func", "return", "while", "if", "else", "var", "Void", "Int", "String", "Char", "Fn"]
     , Token.reservedOpNames = ["+", "-", "*", "/", "%", "and", "or", ">", "<", "==", ">=", "<=", "!="]
+    , Token.commentLine     = "//"
+    , Token.commentStart    = "/*"
+    , Token.commentEnd      = "*/"
     }
 
 lexer :: Token.TokenParser ()

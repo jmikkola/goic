@@ -1,13 +1,16 @@
 module main
 
 func printint(n Int) Void {
+    /*
+     * Print any leading digits first
+     */
     if n / 10 > 0 {
         printint(n / 10)
     }
-    putchar(n % 10 + 48)
+    putchar(n % 10 + 48) // 48 = '0'
 }
 
 func main() Void {
     printint(12345)
-    putchar(10)
+    putchar(10) // 10 = '\n'
 }

@@ -50,6 +50,7 @@ This depends on having `yasm` installed.
 - Support more than 6 arguments
 - Add floats (it would be fun to be able to print the mandelbot set)
 - Add arrays
+- Add strings
 - Add structs
 - Add a small stdlib (e.g. reading files)?
 - Start some optimizations

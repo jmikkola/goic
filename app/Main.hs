@@ -231,10 +231,11 @@ instance Render [ASM] where
 
 data CompileState =
   CompileState
-  { strings :: Map String String -- name to value
-  , labelsUsed :: Int
-  , argNames :: [String]
-  , localVars :: Map String Int -- local var offsets
+  { strings            :: Map String String -- name to value
+  , labelsUsed         :: Int
+  , argNames           :: [String]
+  , localVars          :: Map String Int -- local var offsets
+  , nextLocalVarOffset :: Int
   }
   deriving (Show)
 
@@ -244,10 +245,11 @@ type Compiler a = State CompileState a
 emptyCompileState :: CompileState
 emptyCompileState =
   CompileState
-  { strings = Map.empty
-  , labelsUsed = 0
-  , argNames = []
-  , localVars = Map.empty
+  { strings            = Map.empty
+  , labelsUsed         = 0
+  , argNames           = []
+  , localVars          = Map.empty
+  , nextLocalVarOffset = 0
   }
 
 newLabel :: Compiler String
@@ -291,14 +293,15 @@ compileFunction :: Function -> Compiler [ASM]
 compileFunction (Function name t argNames body) = do
   -- Setup the state for the fuction body
   state <- get
-  put (state { argNames = argNames, localVars = Map.empty })
+  let localVarOffset = 1 + min (length argRegisters) (length argNames)
+  put (state { argNames = argNames, localVars = Map.empty, nextLocalVarOffset = localVarOffset })
   let preamble = functionPreamble name
   -- TODO: Save caller-saved registers (e.g. stack variables) if those registers
   -- will get used during the function body
   asm <- compileBody t argNames body
   -- Clear the function-specific parts of the state
   state' <- get
-  put (state' { argNames = [], localVars = Map.empty })
+  put (state' { argNames = [], localVars = Map.empty, nextLocalVarOffset = 0 })
   return (preamble ++ asm)
 
 functionPreamble :: String -> [ASM]
@@ -314,9 +317,18 @@ compileBody t argNames body = do
   let prologue = map Instruction functionPrologue
   let epilogue = map Instruction functionEpilogue
   let saveArgs = map Instruction $ saveArguments argNames
+
   compiledBody <- compileStatement body
   let end = if (take 1 $ reverse compiledBody) == [Instruction Ret] then [] else [Instruction Ret]
-  return $ prologue ++ saveArgs ++ compiledBody ++ epilogue ++ end
+
+  state <- get
+  let nLocalVars = Map.size $ localVars state
+  let reserveLocalSpace =
+        if nLocalVars == 0
+        then []
+        else [ Instruction $ Sub (Register8 RSP) (Immediate (8 * nLocalVars)) ]
+
+  return $ prologue ++ saveArgs ++ reserveLocalSpace ++ compiledBody ++ epilogue ++ end
 
 saveArguments :: [String] -> [Instr]
 saveArguments argNames =
@@ -348,20 +360,49 @@ compileStatement statement = case statement of
     let instructions = functionEpilogue ++ [Ret]
     return $ map Instruction instructions
   NewVar name t expr ->
-    -- TODO: determine where on the stack `name` lives
-    -- also reserve space on the stack for it
-    -- then compile the expression and mov the result into that stack location
-    undefined
+    compileNewVar name expr
   Assign name expr ->
-    -- TODO: lookup where on the stack `name` lives
-    -- then compile the expression and mov the result into it
-    undefined
+    compileAssign name expr
   If expr tcase ecase ->
     compileIf expr tcase ecase
   While test body ->
     compileWhile test body
   Block statements ->
     concatMapM compileStatement statements
+
+compileNewVar :: String -> Expression -> Compiler [ASM]
+compileNewVar name expr = do
+  index <- createLocalVar name
+  exprAsm <- compileExpression expr
+  let offset = index * (-8)
+  let writeVar = [ Mov (R8Offset offset RBP) (Register8 RAX) ]
+  let instructions = exprAsm ++ writeVar
+  return $ map Instruction instructions
+
+createLocalVar :: String -> Compiler Int
+createLocalVar name = do
+  state <- get
+  let offset = nextLocalVarOffset state
+  let locals = localVars state
+  let updatedLocals = Map.insert name offset locals
+  put $ state { nextLocalVarOffset = (offset + 1), localVars = updatedLocals }
+  return offset
+
+compileAssign :: String -> Expression -> Compiler [ASM]
+compileAssign name expr = do
+  offset <- lookupLocalVar name
+  exprAsm <- compileExpression expr
+  let rbpOffset = offset * (-8)
+  let writeVar = [ Mov (R8Offset rbpOffset RBP) (Register8 RAX) ]
+  let instructions = exprAsm ++ writeVar
+  return $ map Instruction instructions
+
+lookupLocalVar :: String -> Compiler Int
+lookupLocalVar name = do
+  state <- get
+  return $ case Map.lookup name (localVars state) of
+    Nothing -> error ("name should have been defined: " ++ name)
+    Just o  -> o
 
 compileWhile :: Expression -> Statement -> Compiler [ASM]
 compileWhile test body = do
@@ -453,7 +494,9 @@ compileVariable name = do
       if idx < 6
       then return [Mov (Register8 RAX) (R8Offset ((idx + 1) * (-8)) RBP)]
       else error "todo: handle more than 6 args"
-    Nothing  -> error "todo: handle local variables"
+    Nothing  -> do
+      offset <- lookupLocalVar name
+      return [Mov (Register8 RAX) (R8Offset (offset * (-8)) RBP)]
 
 argRegisters :: [Reg8]
 argRegisters = [RDI, RSI, RDX, RCX, R8, R9]

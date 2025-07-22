@@ -11,3 +11,4 @@ main
 examples/fib
 examples/putc
 examples/print_int
+examples/while_loop

@@ -44,7 +44,6 @@ This depends on having `yasm` installed.
 
 ## Next
 
-- Fix stack alignment
 - Other math instructions
 - Support more than 6 arguments
 - Add floats (it would be fun to be able to print the mandelbot set)
@@ -56,11 +55,3 @@ This depends on having `yasm` installed.
 - Support modules
 
 A crazy stretch goal could be to make the compiler self-host.
-
-## Current
-
-Right now the fib example (and the simpler putc example) is segfaulting. Based on chatGPT, it sounds
-like this is a stack alignment issue. I'm aligning it to 8 bytes when it needs to be aligned to 16.
-
-The issue with segfaulting seems to have gone away for no reason I can
-discern. I haven't fixed the stack alignment yet.

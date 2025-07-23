@@ -236,6 +236,7 @@ data CompileState =
   , argNames           :: [String]
   , localVars          :: Map String Int -- local var offsets
   , nextLocalVarOffset :: Int
+  , stackDepth         :: Int
   }
   deriving (Show)
 
@@ -250,6 +251,7 @@ emptyCompileState =
   , argNames           = []
   , localVars          = Map.empty
   , nextLocalVarOffset = 0
+  , stackDepth         = 0
   }
 
 newLabel :: Compiler String
@@ -294,15 +296,44 @@ compileFunction (Function name t argNames body) = do
   -- Setup the state for the fuction body
   state <- get
   let localVarOffset = 1 + min (length argRegisters) (length argNames)
-  put (state { argNames = argNames, localVars = Map.empty, nextLocalVarOffset = localVarOffset })
+  put $ state { argNames = argNames
+              , localVars = Map.empty
+              , nextLocalVarOffset = localVarOffset
+              , stackDepth = 0
+              }
   let preamble = functionPreamble name
   -- TODO: Save caller-saved registers (e.g. stack variables) if those registers
   -- will get used during the function body
   asm <- compileBody t argNames body
   -- Clear the function-specific parts of the state
   state' <- get
-  put (state' { argNames = [], localVars = Map.empty, nextLocalVarOffset = 0 })
+  put $ state' { argNames = []
+               , localVars = Map.empty
+               , nextLocalVarOffset = 0
+               , stackDepth = 0
+               }
   return (preamble ++ asm)
+
+pushStack :: Compiler ()
+pushStack = changeStackDepth 1
+
+popStack :: Compiler ()
+popStack = changeStackDepth (-1)
+
+changeStackDepth :: Int -> Compiler ()
+changeStackDepth offset = do
+  depth <- getStackDepth
+  putStackDepth (depth + offset)
+
+getStackDepth :: Compiler Int
+getStackDepth = do
+  state <- get
+  return (stackDepth state)
+
+putStackDepth :: Int -> Compiler ()
+putStackDepth depth = do
+  state <- get
+  put $ state { stackDepth = depth }
 
 functionPreamble :: String -> [ASM]
 functionPreamble name =
@@ -315,8 +346,16 @@ functionPreamble name =
 compileBody :: FnType -> [String] -> Statement -> Compiler [ASM]
 compileBody t argNames body = do
   let prologue = map Instruction functionPrologue
-  let epilogue = map Instruction functionEpilogue
+  -- the prologue contains one push
+  pushStack
+
   let saveArgs = map Instruction $ saveArguments argNames
+  -- saveArgs can contain multiple pushes
+  changeStackDepth (length saveArgs)
+
+  let epilogue = map Instruction functionEpilogue
+  -- the epilog resets RSP back to RBP, so it wipes out most of the current
+  -- stack frame.
 
   compiledBody <- compileStatement body
   let end = if (take 1 $ reverse compiledBody) == [Instruction Ret] then [] else [Instruction Ret]
@@ -472,7 +511,9 @@ compileExpression expression = case expression of
     compileVariable name
   BinaryOp op left right -> do
     leftInstrs <- compileExpression left
+    pushStack
     rightInstrs <- compileExpression right
+    popStack
     return $ concat [ leftInstrs
                     , [Push $ Register8 RAX]
                     , rightInstrs
@@ -520,18 +561,34 @@ compileCall fnName args = do
         | (r, i) <- zip argRegisters (reverse [0..nArgs - 1])
         ]
 
+  stackDepth <- getStackDepth
+  -- The stack needs to be left in a 16 byte alignment after the call
+  -- instruction, which means it needs to be 8 bytes away from a 16 byte
+  -- alignment right before the call instruction
+  let needsAlignment = stackDepth `mod` 2 == 0
+  let alignment =
+        if needsAlignment
+        then [Sub (Register8 RSP) (Immediate 8)]
+        else []
+
   -- TODO: Save caller saved registers
   let call = [CallI (Address fnName)]
   -- TODO: Restore caller saved registers
 
   -- TODO: Also pop 7th and following args
-  let cleanup = [Add (Register8 RSP) (Immediate $ nArgs * 8)]
+  let popSize =
+        if needsAlignment
+        then (nArgs + 1) * 8
+        else nArgs * 8
+  let cleanup = [Add (Register8 RSP) (Immediate popSize)]
+  changeStackDepth (-popSize)
 
-  return $ argInstrs ++ regFill ++ call ++ cleanup
+  return $ argInstrs ++ regFill ++ alignment ++ call ++ cleanup
 
 compileArg :: Expression ->  Compiler [Instr]
 compileArg argExpr = do
   compiled <- compileExpression argExpr
+  pushStack
   return $ compiled ++ [Push (Register8 RAX)]
 
 

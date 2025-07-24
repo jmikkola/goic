@@ -6,6 +6,8 @@ import Data.Char (toLower)
 import Data.List (elemIndex)
 import Data.Map (Map)
 import qualified Data.Map as Map
+import Data.Set (Set)
+import qualified Data.Set as Set
 import System.Environment (getArgs)
 import System.IO (hPutStrLn, stderr)
 import System.Exit (exitFailure)
@@ -237,7 +239,6 @@ data CompileState =
   , labelsUsed         :: Int
   , argNames           :: [String]
   , localVars          :: Map String Int -- local var offsets
-  , nextLocalVarOffset :: Int
   , stackDepth         :: Int
   }
   deriving (Show)
@@ -252,7 +253,6 @@ emptyCompileState =
   , labelsUsed         = 0
   , argNames           = []
   , localVars          = Map.empty
-  , nextLocalVarOffset = 0
   , stackDepth         = 0
   }
 
@@ -297,10 +297,8 @@ compileFunction :: Function -> Compiler [ASM]
 compileFunction (Function name t argNames body) = do
   -- Setup the state for the fuction body
   state <- get
-  let localVarOffset = 1 + min (length argRegisters) (length argNames)
   put $ state { argNames = argNames
               , localVars = Map.empty
-              , nextLocalVarOffset = localVarOffset
               -- it starts off not aligned to 16 bytes because the call instruction pushes RIP
               , stackDepth = 1
               }
@@ -312,7 +310,6 @@ compileFunction (Function name t argNames body) = do
   state' <- get
   put $ state' { argNames = []
                , localVars = Map.empty
-               , nextLocalVarOffset = 0
                , stackDepth = 0
                }
   return (preamble ++ asm)
@@ -353,6 +350,14 @@ functionPreamble name =
 --       that aren't used for arguments
 compileBody :: FnType -> [String] -> Statement -> Compiler [ASM]
 compileBody t argNames body = do
+  let localVarNames = Set.toList $ findLocalVars body
+  let localVarOffset = 1 + min (length argRegisters) (length argNames)
+  let localVarOffsets = Map.fromList $ zip localVarNames [localVarOffset..]
+  let nLocalVars = Map.size localVarOffsets
+
+  state <- get
+  put $ state { localVars = localVarOffsets }
+
   let prologue = map Instruction functionPrologue
   -- the prologue contains one push
   pushStack
@@ -363,6 +368,13 @@ compileBody t argNames body = do
   changeStackDepth (length saveArgs)
   c2 <- stackSizeComment
 
+  let reserveLocalSpace =
+        if nLocalVars == 0
+        then []
+        else [ Instruction $ Sub (Register8 RSP) (Immediate (8 * nLocalVars)) ]
+  changeStackDepth nLocalVars
+  c3 <- stackSizeComment
+
   let epilogue = map Instruction functionEpilogue
   -- the epilog resets RSP back to RBP, so it wipes out most of the current
   -- stack frame.
@@ -370,15 +382,18 @@ compileBody t argNames body = do
   compiledBody <- compileStatement body
   let end = if (take 1 $ reverse compiledBody) == [Instruction Ret] then [] else [Instruction Ret]
 
-  state <- get
-  let nLocalVars = Map.size $ localVars state
-  -- todo: the offset added for locals isn't added to stackDepth before compiling the body
-  let reserveLocalSpace =
-        if nLocalVars == 0
-        then []
-        else [ Instruction $ Sub (Register8 RSP) (Immediate (8 * nLocalVars)) ]
+  return $ prologue ++ c1 ++ saveArgs ++ c2 ++ reserveLocalSpace ++ c3 ++ compiledBody ++ epilogue ++ end
 
-  return $ prologue ++ c1 ++ saveArgs ++ c2 ++ reserveLocalSpace ++ compiledBody ++ epilogue ++ end
+findLocalVars :: Statement -> Set String
+findLocalVars stmt = findLV stmt Set.empty
+  where findLV st names = case st of
+          NewVar name _ _ -> Set.insert name names
+          If _ s1 s2      -> findLVList [s1, s2] names
+          While _ s1      -> findLV s1 names
+          Block sts       -> findLVList sts names
+          _               -> names
+        findLVList sts names =
+          foldr findLV names sts
 
 saveArguments :: [String] -> [Instr]
 saveArguments argNames =
@@ -420,21 +435,12 @@ compileStatement statement = case statement of
 
 compileNewVar :: String -> Expression -> Compiler [ASM]
 compileNewVar name expr = do
-  index <- createLocalVar name
+  index <- lookupLocalVar name
   exprAsm <- compileExpression expr
   let offset = index * (-8)
   let writeVar = [ Instruction $ Mov (R8Offset offset RBP) (Register8 RAX) ]
   let instructions = exprAsm ++ writeVar
   return instructions
-
-createLocalVar :: String -> Compiler Int
-createLocalVar name = do
-  state <- get
-  let offset = nextLocalVarOffset state
-  let locals = localVars state
-  let updatedLocals = Map.insert name offset locals
-  put $ state { nextLocalVarOffset = (offset + 1), localVars = updatedLocals }
-  return offset
 
 compileAssign :: String -> Expression -> Compiler [ASM]
 compileAssign name expr = do

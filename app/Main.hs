@@ -335,11 +335,6 @@ putStackDepth depth = do
   state <- get
   put $ state { stackDepth = depth }
 
-stackSizeComment :: Compiler [ASM]
-stackSizeComment = do
-  depth <- getStackDepth
-  return [Comment $ "estimated stack frame depth: " ++ show depth]
-
 functionPreamble :: String -> [ASM]
 functionPreamble name =
   [ Directive "global" [name]
@@ -361,19 +356,16 @@ compileBody t argNames body = do
   let prologue = map Instruction functionPrologue
   -- the prologue contains one push
   pushStack
-  c1 <- stackSizeComment
 
   let saveArgs = map Instruction $ saveArguments argNames
   -- saveArgs can contain multiple pushes
   changeStackDepth (length saveArgs)
-  c2 <- stackSizeComment
 
   let reserveLocalSpace =
         if nLocalVars == 0
         then []
         else [ Instruction $ Sub (Register8 RSP) (Immediate (8 * nLocalVars)) ]
   changeStackDepth nLocalVars
-  c3 <- stackSizeComment
 
   let epilogue = map Instruction functionEpilogue
   -- the epilog resets RSP back to RBP, so it wipes out most of the current
@@ -382,7 +374,7 @@ compileBody t argNames body = do
   compiledBody <- compileStatement body
   let end = if (take 1 $ reverse compiledBody) == [Instruction Ret] then [] else [Instruction Ret]
 
-  return $ prologue ++ c1 ++ saveArgs ++ c2 ++ reserveLocalSpace ++ c3 ++ compiledBody ++ epilogue ++ end
+  return $ prologue ++ saveArgs ++ reserveLocalSpace ++ compiledBody ++ epilogue ++ end
 
 findLocalVars :: Statement -> Set String
 findLocalVars stmt = findLV stmt Set.empty
@@ -528,18 +520,14 @@ compileExpression expression = case expression of
   BinaryOp op left right -> do
     leftInstrs <- compileExpression left
     pushStack
-    c1 <- stackSizeComment
     rightInstrs <- compileExpression right
     popStack
-    c2 <- stackSizeComment
     return $ concat [ leftInstrs
                     , [Instruction $ Push $ Register8 RAX]
-                    , c1
                     , rightInstrs
                     , [ Instruction $ Mov (Register8 RBX) (Register8 RAX)
                       , Instruction $ Pop $ Register8 RAX
                       ]
-                    , c2
                     , map Instruction $ compileOp op
                     ]
   Paren inner -> compileExpression inner
@@ -592,8 +580,6 @@ compileCall fnName args = do
     then pushStack
     else return ()
 
-  c1 <- stackSizeComment
-
   -- TODO: Save caller saved registers
   let call = [Instruction $ CallI (Address fnName)]
   -- TODO: Restore caller saved registers
@@ -602,16 +588,14 @@ compileCall fnName args = do
   let popSize = if needsAlignment then nArgs + 1 else nArgs
   let cleanup = [Instruction $ Add (Register8 RSP) (Immediate (popSize * 8))]
   changeStackDepth (-popSize)
-  c2 <- stackSizeComment
 
-  return $ argInstrs ++ regFill ++ alignment ++ c1 ++ call ++ cleanup ++ c2
+  return $ argInstrs ++ regFill ++ alignment ++ call ++ cleanup
 
 compileArg :: Expression ->  Compiler [ASM]
 compileArg argExpr = do
   compiled <- compileExpression argExpr
   pushStack
-  c <- stackSizeComment
-  return $ compiled ++ [Instruction $ Push (Register8 RAX)] ++ c
+  return $ compiled ++ [Instruction $ Push (Register8 RAX)]
 
 
 compileOp :: Op -> [Instr]

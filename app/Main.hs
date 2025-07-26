@@ -535,7 +535,42 @@ compileLiteral value = case value of
     return [Instruction $ Mov (Register8 RAX) (Address varname)]
 
 compileBinaryOp :: Op -> Expression -> Expression -> Compiler [ASM]
-compileBinaryOp op left right = do
+compileBinaryOp op left right = case op of
+  Plus     -> compileBinMath left right [Add (Register8 RAX) (Register8 RBX)]
+  Minus    -> compileBinMath left right [Sub (Register8 RAX) (Register8 RBX)]
+  Times    -> compileBinMath left right [Mul (Register8 RBX)]
+  Divide   -> compileBinMath left right [Cqo, IDiv (Register8 RBX)]
+  Mod      -> compileBinMath left right [ Cqo
+                                        , IDiv (Register8 RBX)
+                                        , Mov (Register8 RAX) (Register8 RDX) ]
+  And      -> compileAnd left right
+  Or       -> compileOr  left right
+  Greater  -> compileBinComp left right Setg
+  Less     -> compileBinComp left right Setl
+  Equal    -> compileBinComp left right Sete
+  GEqual   -> compileBinComp left right Setge
+  LEqual   -> compileBinComp left right Setle
+  NotEqual -> compileBinComp left right Setne
+
+-- This is a convenience function for compiling binary values then
+-- running some math instruction[s] on them
+compileBinMath :: Expression -> Expression -> [Instr] -> Compiler [ASM]
+compileBinMath left right instrs = do
+  setup <- compileBinaryValues left right
+  return $ setup ++ (toASM instrs)
+
+compileBinComp :: Expression -> Expression -> (Arg -> Instr) -> Compiler [ASM]
+compileBinComp left right setInstr = do
+  setup <- compileBinaryValues left right
+  let instrs = [ Cmp (Register8 RAX) (Register8 RBX)
+               , setInstr (Register1 AL)
+               , Movzx (Register4 EAX) (Register1 AL) ]
+  return $ setup ++ (toASM instrs)
+
+-- creates code that will evaluate both `left` and `right`, and
+-- leave the results in RAX and RBX, respectively
+compileBinaryValues :: Expression -> Expression -> Compiler [ASM]
+compileBinaryValues left right = do
   -- compile the left hand side and push the result on the stack
   leftInstrs <- compileExpression left
   let pushInstrs = [Instruction $ Push $ Register8 RAX]
@@ -548,10 +583,11 @@ compileBinaryOp op left right = do
         , Instruction $ Pop $ Register8 RAX
         ]
   popStack
-  -- execute the op
-  let opInstrs = toASM $ compileOp op
-  let allInstrs = [ leftInstrs, pushInstrs, rightInstrs, swapAndPopInstrs, opInstrs ]
-  return $ concat allInstrs
+  return $ concat [leftInstrs, pushInstrs, rightInstrs, swapAndPopInstrs]
+
+compileAnd = undefined
+compileOr = undefined
+
 
 compileVariable :: String -> Compiler [ASM]
 compileVariable name = do
@@ -614,32 +650,6 @@ compileArg argExpr = do
   compiled <- compileExpression argExpr
   pushStack
   return $ compiled ++ [Instruction $ Push (Register8 RAX)]
-
-
-compileOp :: Op -> [Instr]
-compileOp Plus  = [Add (Register8 RAX) (Register8 RBX)]
-compileOp Minus = [Sub (Register8 RAX) (Register8 RBX)]
-compileOp Times = [Mul (Register8 RBX)]
-compileOp Divide =
-  [ Cqo
-  , IDiv (Register8 RBX) ]
-compileOp Mod =
-  [ Cqo
-  , IDiv (Register8 RBX), Mov (Register8 RAX) (Register8 RDX) ]
-compileOp And = error "todo"
-compileOp Or = error "todo"
-compileOp Less     = compileComparison Setl
-compileOp Greater  = compileComparison Setg
-compileOp Equal    = compileComparison Sete
-compileOp GEqual   = compileComparison Setge
-compileOp LEqual   = compileComparison Setle
-compileOp NotEqual = compileComparison Setne
-
-compileComparison :: (Arg -> Instr) -> [Instr]
-compileComparison setInstr =
-  [ Cmp (Register8 RAX) (Register8 RBX)
-  , setInstr (Register1 AL)
-  , Movzx (Register4 EAX) (Register1 AL) ]
 
 toASM :: [Instr] -> [ASM]
 toASM = map Instruction

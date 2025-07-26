@@ -1,0 +1,14 @@
+module main
+
+func printint(n Int) Void {
+    if n / 10 > 0 {
+        printint(n / 10)
+    }
+    putchar(n % 10 + 48) // 48 = '0'
+}
+
+func main() Void {
+    var a Int = -12345
+    printint(-a)
+    putchar(10) // 10 = '\n'
+}

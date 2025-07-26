@@ -1,0 +1,15 @@
+module main
+
+func main() Void {
+    print_bool(not 0) // true
+    print_bool(not 1) // false
+    print_bool(not 8) // false
+}
+
+func print_bool(x Int) Void {
+    if x {
+        puts("true")
+    } else {
+        puts("false")
+    }
+}

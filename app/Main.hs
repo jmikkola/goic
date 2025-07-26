@@ -138,6 +138,7 @@ data Instr
   | Sub Arg Arg
   | Mul Arg
   | IDiv Arg
+  | Neg Arg
   | Cqo
   | CallI Arg
   | Cmp Arg Arg
@@ -218,6 +219,7 @@ instance Render Instr where
     Sub a b   -> "sub\t" ++ render a ++ ", " ++ render b
     Mul a     -> "mul\t" ++ render a
     IDiv a    -> "idiv\t" ++ render a
+    Neg a     -> "neg\t" ++ render a
     Cqo       -> "cqo"
     CallI arg -> "call\t" ++ render arg
     Cmp a b   -> "cmp\t" ++ render a ++ ", " ++ render b
@@ -523,6 +525,7 @@ compileExpression expression = case expression of
   Literal value          -> compileLiteral value
   Variable name          -> compileVariable name
   BinaryOp op left right -> compileBinaryOp op left right
+  UnaryOp op inner       -> compileUnaryOp op inner
   Paren inner            -> compileExpression inner
   Call function args     -> case function of
     -- TODO: Ensure that `fnName` refers to a function not a local or argument
@@ -536,6 +539,16 @@ compileLiteral value = case value of
   VString s -> do
     varname <- addString s
     return [Instruction $ Mov (Register8 RAX) (Address varname)]
+
+compileUnaryOp :: Uop -> Expression -> Compiler [ASM]
+compileUnaryOp op inner = do
+  innerAsm <- compileExpression inner
+  let operation = case op of
+        Negate -> toASM [ Neg (Register8 RAX) ]
+        Not    -> toASM [ Cmp (Register8 RAX) (Immediate 0)
+                        , Sete (Register1 AL)
+                        , Movzx (Register8 RAX) (Register1 AL) ]
+  return $ innerAsm ++ operation
 
 compileBinaryOp :: Op -> Expression -> Expression -> Compiler [ASM]
 compileBinaryOp op left right = case op of
@@ -842,6 +855,11 @@ typecheck names (BinaryOp o l r) = do
          else if lType == String && o == Plus
               then Right String
               else Left $ "Invalid type for " ++ show o ++ ": " ++ show lType
+typecheck names (UnaryOp o inner) = do
+  iType <- typecheck names inner
+  if iType == Int
+    then return Int
+    else Left $ "Invalid type for unary " ++ show o ++ ": " ++ show iType
 typecheck names (Paren e) =
   typecheck names e
 typecheck names (Call e args) = do
@@ -891,6 +909,7 @@ data Expression
     = Literal Value
     | Variable String
     | BinaryOp Op Expression Expression
+    | UnaryOp Uop Expression
     | Paren Expression
     | Call Expression [Expression]
     deriving (Show)
@@ -915,6 +934,11 @@ data Op
     | LEqual
     | NotEqual
     deriving (Eq, Show)
+
+data Uop
+  = Not
+  | Negate
+  deriving (Eq, Show)
 
 data FnType = FnType [Type] Type
     deriving (Eq, Show)
@@ -962,7 +986,7 @@ langDef = emptyDef
     , Token.opStart         = oneOf "+-*/%<>=!&|"
     , Token.opLetter        = oneOf "+-*/%<>=!&|"
     , Token.reservedNames   = ["module", "func", "return", "while", "if", "else", "var", "Void", "Int", "String", "Char", "Fn"]
-    , Token.reservedOpNames = ["+", "-", "*", "/", "%", "and", "or", ">", "<", "==", ">=", "<=", "!="]
+    , Token.reservedOpNames = ["+", "-", "*", "/", "%", "and", "or", "not", ">", "<", "==", ">=", "<=", "!="]
     , Token.commentLine     = "//"
     , Token.commentStart    = "/*"
     , Token.commentEnd      = "*/"
@@ -1095,9 +1119,12 @@ operatorTable =
     , [binary "==" Equal AssocNone, binary "!=" NotEqual AssocNone]
     , [binary "and" And AssocLeft]
     , [binary "or" Or AssocLeft]
+    , [prefix "not" Not]
+    , [prefix "-" Negate]
     ]
     where
       binary name op = Infix (do{ reservedOp name; return (BinaryOp op) })
+      prefix name unop = Prefix (do{ reservedOp name; return (UnaryOp unop) })
 
 term :: Parser Expression
 term = choice

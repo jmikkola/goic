@@ -44,7 +44,6 @@ This depends on having `yasm` installed.
 
 ## Next
 
-- Add unary operators (negate, not)
 - Support more than 6 arguments
 - Handle function pointers
 - Add bitwise operators (shifts, masks, invert)

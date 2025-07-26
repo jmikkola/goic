@@ -16,3 +16,5 @@ examples/while_loop
 examples/functions
 examples/boolean_operators
 examples/boolean_short_circuit
+examples/negate
+examples/not

@@ -1,0 +1,27 @@
+module main
+
+func main() Void {
+    // demonstrate that short-circuiting works because dont_print_me() is never called
+    print_bool(1 and print_me())
+    print_bool(0 and dont_print_me())
+    print_bool(1 or dont_print_me())
+    print_bool(0 or print_me())
+}
+
+func print_me() Int {
+    puts("print me")
+    return 1
+}
+
+func dont_print_me() Int {
+    puts("don't print me")
+    return 1
+}
+
+func print_bool(x Int) Void {
+    if x {
+        puts("true")
+    } else {
+        puts("false")
+    }
+}

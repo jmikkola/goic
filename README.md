@@ -44,9 +44,10 @@ This depends on having `yasm` installed.
 
 ## Next
 
-- Other math instructions
+- Add unary operators (negate, not)
 - Support more than 6 arguments
 - Handle function pointers
+- Add bitwise operators (shifts, masks, invert)
 - Add floats (it would be fun to be able to print the mandelbot set)
 - Add arrays
 - Add strings

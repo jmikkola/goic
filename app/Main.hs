@@ -149,6 +149,7 @@ data Instr
   | Setne Arg
   | Jmp String
   | Je String
+  | Jne String
   | Ret
   | Syscall
   deriving (Eq, Show)
@@ -228,6 +229,7 @@ instance Render Instr where
     Setne arg -> "setne\t" ++ render arg
     Jmp l     -> "jmp\t" ++ l
     Je l      -> "je\t" ++ l
+    Jne l     -> "jne\t" ++ l
     Syscall   -> "syscall"
 
 instance Render ASM where
@@ -298,7 +300,8 @@ defineStart =
 
 compileStringDecls :: Map String String -> [ASM]
 compileStringDecls strs =
-  [ Constant name "db" (show value)
+  -- the ", 0" at the end adds a null termination
+  [ Constant name "db" (show value ++ ", 0")
   | (name, value) <- Map.toList strs ]
 
 compileFunction :: Function -> Compiler [ASM]
@@ -585,9 +588,55 @@ compileBinaryValues left right = do
   popStack
   return $ concat [leftInstrs, pushInstrs, rightInstrs, swapAndPopInstrs]
 
-compileAnd = undefined
-compileOr = undefined
+compileAnd :: Expression -> Expression -> Compiler [ASM]
+compileAnd left right = do
+  labelFalse <- newLabel
+  labelEnd   <- newLabel
 
+  leftInstrs  <- compileExpression left
+  rightInstrs <- compileExpression right
+
+  let instructions =
+        [ leftInstrs
+        , toASM [ Cmp (Register8 RAX) (Immediate 0)
+                , Je labelFalse ]
+        , rightInstrs
+        , toASM [ Cmp (Register8 RAX) (Immediate 0)
+                , Je labelFalse ]
+        , toASM [ Mov (Register8 RAX) (Immediate 1)
+                , Jmp labelEnd ]
+        , [Label labelFalse]
+        , toASM [ Mov (Register8 RAX) (Immediate 0) ]
+        , [Label labelEnd]
+        , toASM [ Movzx (Register8 RAX) (Register1 AL) ]
+        ]
+  return $ concat instructions
+
+compileOr :: Expression -> Expression -> Compiler [ASM]
+compileOr left right = do
+  labelTrue  <- newLabel
+  labelFalse <- newLabel
+  labelEnd   <- newLabel
+
+  leftInstrs  <- compileExpression left
+  rightInstrs <- compileExpression right
+
+  let instructions =
+        [ leftInstrs
+        , toASM [ Cmp (Register8 RAX) (Immediate 0)
+                , Jne labelTrue ]
+        , rightInstrs
+        , toASM [ Cmp (Register8 RAX) (Immediate 0)
+                , Je labelFalse ]
+        , [Label labelTrue]
+        , toASM [ Mov (Register8 RAX) (Immediate 1)
+                , Jmp labelEnd ]
+        , [Label labelFalse]
+        , toASM [ Mov (Register8 RAX) (Immediate 0) ]
+        , [Label labelEnd]
+        , toASM [ Movzx (Register8 RAX) (Register1 AL) ]
+        ]
+  return $ concat instructions
 
 compileVariable :: String -> Compiler [ASM]
 compileVariable name = do

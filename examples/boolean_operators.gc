@@ -1,0 +1,54 @@
+module main
+
+func main() Void {
+    puts("1 and 1 =")
+    print_bool(1 and 1)
+    puts("1 and 0 =")
+    print_bool(1 and 0)
+    puts("0 and 1 =")
+    print_bool(0 and 1)
+    puts("0 and 0 =")
+    print_bool(0 and 0)
+
+    puts("")
+
+    puts("1 or 1 =")
+    print_bool(1 or 1)
+    puts("1 or 0 =")
+    print_bool(1 or 0)
+    puts("0 or 1 =")
+    print_bool(0 or 1)
+    puts("0 or 0 =")
+    print_bool(0 or 0)
+
+    puts("")
+
+    puts("1 xor 1 =")
+    print_bool(my_xor(1, 1))
+    puts("1 xor 0 =")
+    print_bool(my_xor(1, 0))
+    puts("0 xor 1 =")
+    print_bool(my_xor(0, 1))
+    puts("0 xor 0 =")
+    print_bool(my_xor(0, 0))
+}
+
+func my_xor(a Int, b Int) Int {
+    return (a or b) and my_not(a and b)
+}
+
+func my_not(x Int) Int {
+    if x {
+        return 0
+    } else {
+        return 1
+    }
+}
+
+func print_bool(x Int) Void {
+    if x {
+        puts("true")
+    } else {
+        puts("false")
+    }
+}

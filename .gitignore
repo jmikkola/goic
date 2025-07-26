@@ -13,3 +13,4 @@ examples/putc
 examples/print_int
 examples/while_loop
 .gdb_history
+examples/functions

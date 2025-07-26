@@ -143,6 +143,10 @@ data Instr
   | Cmp Arg Arg
   | Setl Arg
   | Setg Arg
+  | Sete Arg
+  | Setge Arg
+  | Setle Arg
+  | Setne Arg
   | Jmp String
   | Je String
   | Ret
@@ -218,6 +222,10 @@ instance Render Instr where
     Cmp a b   -> "cmp\t" ++ render a ++ ", " ++ render b
     Setl arg  -> "setl\t" ++ render arg
     Setg arg  -> "setg\t" ++ render arg
+    Sete arg  -> "sete\t" ++ render arg
+    Setge arg -> "setge\t" ++ render arg
+    Setle arg -> "setle\t" ++ render arg
+    Setne arg -> "setne\t" ++ render arg
     Jmp l     -> "jmp\t" ++ l
     Je l      -> "je\t" ++ l
     Syscall   -> "syscall"
@@ -608,15 +616,20 @@ compileOp Divide =
 compileOp Mod =
   [ Cqo
   , IDiv (Register8 RBX), Mov (Register8 RAX) (Register8 RDX) ]
-compileOp Less =
+compileOp And = error "todo"
+compileOp Or = error "todo"
+compileOp Less     = compileComparison Setl
+compileOp Greater  = compileComparison Setg
+compileOp Equal    = compileComparison Sete
+compileOp GEqual   = compileComparison Setge
+compileOp LEqual   = compileComparison Setle
+compileOp NotEqual = compileComparison Setne
+
+compileComparison :: (Arg -> Instr) -> [Instr]
+compileComparison setInstr =
   [ Cmp (Register8 RAX) (Register8 RBX)
-  , Setl (Register1 AL)
+  , setInstr (Register1 AL)
   , Movzx (Register4 EAX) (Register1 AL) ]
-compileOp Greater =
-  [ Cmp (Register8 RAX) (Register8 RBX)
-  , Setg (Register1 AL)
-  , Movzx (Register4 EAX) (Register1 AL) ]
-compileOp op    = error $ "todo: handle op " ++ show op
 
 
 join :: String -> [String] -> String

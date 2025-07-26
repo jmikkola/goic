@@ -517,43 +517,53 @@ addString string = do
 
 compileExpression :: Expression -> Compiler [ASM]
 compileExpression expression = case expression of
-  Literal value -> case value of
-    VInt i    -> return [Instruction $ Mov (Register8 RAX) (Immediate i)]
-    VString s -> do
-      varname <- addString s
-      return [Instruction $ Mov (Register8 RAX) (Address varname)]
-  Variable name -> do
-    instrs <- compileVariable name
-    return $ map Instruction instrs
-  BinaryOp op left right -> do
-    leftInstrs <- compileExpression left
-    pushStack
-    rightInstrs <- compileExpression right
-    popStack
-    return $ concat [ leftInstrs
-                    , [Instruction $ Push $ Register8 RAX]
-                    , rightInstrs
-                    , [ Instruction $ Mov (Register8 RBX) (Register8 RAX)
-                      , Instruction $ Pop $ Register8 RAX
-                      ]
-                    , map Instruction $ compileOp op
-                    ]
-  Paren inner -> compileExpression inner
-  Call function args -> case function of
+  Literal value          -> compileLiteral value
+  Variable name          -> compileVariable name
+  BinaryOp op left right -> compileBinaryOp op left right
+  Paren inner            -> compileExpression inner
+  Call function args     -> case function of
+    -- TODO: Ensure that `fnName` refers to a function not a local or argument
     Variable fnName -> compileCall fnName args
     _               -> error "cannot handle function pointers yet"
 
-compileVariable :: String -> Compiler [Instr]
+compileLiteral :: Value -> Compiler [ASM]
+compileLiteral value = case value of
+  VInt i    ->
+    return [Instruction $ Mov (Register8 RAX) (Immediate i)]
+  VString s -> do
+    varname <- addString s
+    return [Instruction $ Mov (Register8 RAX) (Address varname)]
+
+compileBinaryOp :: Op -> Expression -> Expression -> Compiler [ASM]
+compileBinaryOp op left right = do
+  -- compile the left hand side and push the result on the stack
+  leftInstrs <- compileExpression left
+  let pushInstrs = [Instruction $ Push $ Register8 RAX]
+  pushStack
+  -- compile the right hand side
+  rightInstrs <- compileExpression right
+  -- move the right hand side to RBX, then pop the left hand side into RAX
+  let swapAndPopInstrs =
+        [ Instruction $ Mov (Register8 RBX) (Register8 RAX)
+        , Instruction $ Pop $ Register8 RAX
+        ]
+  popStack
+  -- execute the op
+  let opInstrs = toASM $ compileOp op
+  let allInstrs = [ leftInstrs, pushInstrs, rightInstrs, swapAndPopInstrs, opInstrs ]
+  return $ concat allInstrs
+
+compileVariable :: String -> Compiler [ASM]
 compileVariable name = do
   state <- get
   case elemIndex name (argNames state) of
     Just idx ->
       if idx < 6
-      then return [Mov (Register8 RAX) (R8Offset ((idx + 1) * (-8)) RBP)]
+      then return $ toASM [Mov (Register8 RAX) (R8Offset ((idx + 1) * (-8)) RBP)]
       else error "todo: handle more than 6 args"
     Nothing  -> do
       offset <- lookupLocalVar name
-      return [Mov (Register8 RAX) (R8Offset (offset * (-8)) RBP)]
+      return $ toASM [Mov (Register8 RAX) (R8Offset (offset * (-8)) RBP)]
 
 argRegisters :: [Reg8]
 argRegisters = [RDI, RSI, RDX, RCX, R8, R9]
@@ -631,6 +641,8 @@ compileComparison setInstr =
   , setInstr (Register1 AL)
   , Movzx (Register4 EAX) (Register1 AL) ]
 
+toASM :: [Instr] -> [ASM]
+toASM = map Instruction
 
 join :: String -> [String] -> String
 join _ [] = ""

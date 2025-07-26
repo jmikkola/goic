@@ -46,6 +46,7 @@ This depends on having `yasm` installed.
 
 - Other math instructions
 - Support more than 6 arguments
+- Handle function pointers
 - Add floats (it would be fun to be able to print the mandelbot set)
 - Add arrays
 - Add strings

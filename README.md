@@ -45,12 +45,13 @@ This depends on having `yasm` installed.
 ## Next
 
 - Support more than 6 arguments
-- Handle function pointers
+- Handle pointers
 - Add bitwise operators (shifts, masks, invert)
 - Add floats (it would be fun to be able to print the mandelbot set)
 - Add arrays
-- Add strings
 - Add structs
+- Add string operations
+- Handle function pointers
 - Add a small stdlib (e.g. reading files)?
 - Start some optimizations
 - Support modules

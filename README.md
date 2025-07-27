@@ -44,7 +44,6 @@ This depends on having `yasm` installed.
 
 ## Next
 
-- Support more than 6 arguments
 - Handle pointers
 - Add bitwise operators (shifts, masks, invert)
 - Add floats (it would be fun to be able to print the mandelbot set)

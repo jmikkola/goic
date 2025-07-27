@@ -1,0 +1,33 @@
+module main
+
+func main() Void {
+    // Make sure this works at both even and odd stack alignments:
+    many_args(10, 20, 30, 40, 50, 60, 70, 80, 90, 100)
+    1 + many_args(10, 20, 30, 40, 50, 60, 70, 80, 90, 100)
+}
+
+func many_args(a1 Int, a2 Int, a3 Int, a4 Int, a5 Int, a6 Int, a7 Int, a8 Int, a9 Int, a10 Int) Int {
+    showint(a1)
+    showint(a2)
+    showint(a3)
+    showint(a4)
+    showint(a5)
+    showint(a6)
+    showint(a7)
+    showint(a8)
+    showint(a9)
+    showint(a10)
+    return 0
+}
+
+func showint(n Int) Void {
+    printint(n)
+    putchar(10)
+}
+
+func printint(n Int) Void {
+    if n / 10 > 0 {
+        printint(n / 10)
+    }
+    putchar(n % 10 + 48)
+}

@@ -198,15 +198,15 @@ instance Render Arg where
     Register4 r -> render r
     Register1 r -> render r
     R8Offset       offset r ->
-      "[" ++ render r ++ "+" ++ show offset ++ "]"
+      "qword [" ++ render r ++ "+" ++ show offset ++ "]"
     R8Address             r ->
-      "[" ++ render r ++ "]"
+      "qword [" ++ render r ++ "]"
     R8Index               r index ->
-      "[" ++ render r ++ "+" ++ render index ++ "]"
+      "qword [" ++ render r ++ "+" ++ render index ++ "]"
     R8Scaled              r index scale ->
-      "[" ++ render r ++ "+" ++ render index ++ "*" ++ show scale ++ "]"
+      "qword [" ++ render r ++ "+" ++ render index ++ "*" ++ show scale ++ "]"
     R8ScaledOffset offset r index scale ->
-      "[" ++ render r ++ "+" ++ render index ++ "*" ++ show scale ++ "+" ++ show offset ++ "]"
+      "qword [" ++ render r ++ "+" ++ render index ++ "*" ++ show scale ++ "+" ++ show offset ++ "]"
 
 instance Render Instr where
   render instr = case instr of
@@ -669,9 +669,16 @@ compileVariable name = do
   state <- get
   case elemIndex name (argNames state) of
     Just idx ->
-      if idx < 6
-      then return $ toASM [Mov (Register8 RAX) (R8Offset ((idx + 1) * (-8)) RBP)]
-      else error "todo: handle more than 6 args"
+      let offset = if idx < 6
+                   -- read args inside this stack frame where they were saved
+                   -- from the registers by this function
+                   then (idx + 1) * (-8)
+                   -- read args from the previous stack frame where they were
+                   -- saved by the caller
+                   -- (-6: ignore the first 6 indexes, +2: skip over where RBP
+                   -- and RIP are stored on the stack)
+                   else (idx - 6 + 2) * 8
+      in return $ toASM [Mov (Register8 RAX) (R8Offset offset RBP)]
     Nothing  -> do
       offset <- lookupLocalVar name
       return $ toASM [Mov (Register8 RAX) (R8Offset (offset * (-8)) RBP)]
@@ -687,10 +694,9 @@ compileCall fnName args = do
   -- Push all N arguments on to the stack, left to right
   argInstrs <- concatMapM compileArg args
 
-  -- TODO: repush the 7th and following arguments
-  if nArgs > 6
-    then error "can't handle more than 6 args yet"
-    else return ()
+  -- Figure out how many arguments will be passed on the stack (the first 6 are
+  -- passed in registers)
+  let nStackArgs = if nArgs > 6 then nArgs - 6 else 0
 
   -- Fill the argument-passing registers with the values from the stack
   let regFill =
@@ -699,26 +705,38 @@ compileCall fnName args = do
         ]
 
   stackDepth <- getStackDepth
-  -- The stack needs to be left in a 16 byte alignment before the call
-  let needsAlignment = stackDepth `mod` 2 == 1
-  let alignment =
-        if needsAlignment
-        then [Instruction $ Sub (Register8 RSP) (Immediate 8)]
-        else []
-  if needsAlignment
-    then pushStack
-    else return ()
+  -- The stack needs to be left in a 16 byte alignment before the call.
+  -- This determines what the stack depth will end up being after the arguments
+  -- that are passed on the stack are pushed.
+  -- The stack alignment happens *before* those arguments are pushed.
+  let needsAlignment = (stackDepth + nStackArgs) `mod` 2 == 1
+  (alignmentOffset, alignment) <- if needsAlignment
+    then do
+        pushStack
+        return (1, toASM [Sub (Register8 RSP) (Immediate 8)])
+    else
+        return (0, [])
+
+  -- Push the 7th and following args.
+  -- The 7th arg ends up being the top of the stack, the 8th arg after that, etc.
+  -- Explanation of the formula:
+  --  - `8 *`: Words are 8 bytes
+  --  - `alignmentOffset`: account for the `sub RSP 8` and read further back
+  --  - `+ 2 * n`: As this pushes args, RSP changes _and_ this needs to read
+  --    further back
+  let pushArgs =
+        toASM [ Push $ R8Offset (8 * (alignmentOffset + 2 * n)) RSP
+              | n <- [0..nStackArgs-1] ]
 
   -- TODO: Save caller saved registers
   let call = [Instruction $ CallI (Address fnName)]
   -- TODO: Restore caller saved registers
 
-  -- TODO: Also pop 7th and following args
-  let popSize = if needsAlignment then nArgs + 1 else nArgs
+  let popSize = nArgs + nStackArgs + alignmentOffset
   let cleanup = [Instruction $ Add (Register8 RSP) (Immediate (popSize * 8))]
   changeStackDepth (-popSize)
 
-  return $ argInstrs ++ regFill ++ alignment ++ call ++ cleanup
+  return $ argInstrs ++ regFill ++ alignment ++ pushArgs ++ call ++ cleanup
 
 compileArg :: Expression ->  Compiler [ASM]
 compileArg argExpr = do

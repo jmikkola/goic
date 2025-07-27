@@ -487,8 +487,21 @@ compileWhile test body = do
             ]
     return $ concat results
 
--- TODO: Add a special case for an empty 'else' statement
 compileIf :: Expression -> Statement -> Statement -> Compiler [ASM]
+-- A special case for an empty else block
+compileIf expr tcase (Block []) = do
+  endLabel <- newLabel
+  testAsm  <- compileExpression expr
+  thenCase <- compileStatement tcase
+
+  let results =
+        [ testAsm
+        , toASM [ Cmp (Register8 RAX) (Immediate 0)
+                , Je endLabel ]
+        , thenCase
+        , [ Label endLabel ]
+        ]
+  return $ concat results
 compileIf expr tcase ecase = do
   elseLabel <- newLabel
   endLabel  <- newLabel

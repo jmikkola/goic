@@ -431,6 +431,8 @@ compileStatement statement = case statement of
     compileNewVar name expr
   Assign name expr ->
     compileAssign name expr
+  AssignPtr name expr ->
+    undefined -- TODO
   If expr tcase ecase ->
     compileIf expr tcase ecase
   While test body ->
@@ -561,6 +563,8 @@ compileUnaryOp op inner = do
         Not    -> toASM [ Cmp (Register8 RAX) (Immediate 0)
                         , Sete (Register1 AL)
                         , Movzx (Register8 RAX) (Register1 AL) ]
+        TakeReference -> undefined -- TODO
+        Dereference -> undefined -- TODO
   return $ innerAsm ++ operation
 
 compileBinaryOp :: Op -> Expression -> Expression -> Compiler [ASM]
@@ -825,6 +829,8 @@ checkStatement names returnType stmt = case stmt of
     errIf (exprT /= t) ("Type mismatch for assignment to variable " ++ name ++ ", type is " ++ show t ++
                        " but expression is " ++ show exprT)
     return names
+  AssignPtr name expr ->
+    undefined -- TODO
   If test body0 body1 -> do
     testT <- typecheck names test
     errIf (testT /= Int) ("If statement test value must be an Int, got " ++ show testT)
@@ -931,6 +937,7 @@ data Statement
     | BareReturn
     | NewVar String Type Expression
     | Assign String Expression
+    | AssignPtr String Expression
     | If Expression Statement Statement
     | While Expression Statement
     | Block [Statement]
@@ -969,6 +976,8 @@ data Op
 data Uop
   = Not
   | Negate
+  | TakeReference
+  | Dereference
   deriving (Eq, Show)
 
 data FnType = FnType [Type] Type
@@ -980,6 +989,7 @@ data Type
     | Int
     | String
     | Char
+    | Pointer Type
     deriving (Eq, Show)
 
 fnName :: Function -> (String, (Type, Source))
@@ -1130,6 +1140,7 @@ typeParser = choice
     , reserved "String" >> return String
     , reserved "Char"   >> return Char
     , funcType
+    , pointerType
     ]
 
 funcType :: Parser Type
@@ -1138,6 +1149,12 @@ funcType = do
     args <- parens (commaSep typeParser)
     retType <- typeParser
     return $ Func $ FnType args retType
+
+pointerType :: Parser Type
+pointerType = do
+  reservedOp "*"
+  innerType <- typeParser
+  return $ Pointer innerType
 
 -- Expression Parsers
 expression :: Parser Expression
@@ -1152,6 +1169,7 @@ operatorTable =
     , [binary "or" Or AssocLeft]
     , [prefix "not" Not]
     , [prefix "-" Negate]
+    , [prefix "*" Dereference, prefix "&" TakeReference]
     ]
     where
       binary name op = Infix (do{ reservedOp name; return (BinaryOp op) })

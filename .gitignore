@@ -19,3 +19,4 @@ examples/boolean_short_circuit
 examples/negate
 examples/not
 examples/many_args
+examples/pointers

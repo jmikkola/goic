@@ -829,8 +829,16 @@ checkStatement names returnType stmt = case stmt of
     errIf (exprT /= t) ("Type mismatch for assignment to variable " ++ name ++ ", type is " ++ show t ++
                        " but expression is " ++ show exprT)
     return names
-  AssignPtr name expr ->
-    undefined -- TODO
+  AssignPtr name expr -> do
+    (t, source) <- case lookup name names of
+      Nothing -> Left ("Assigning to an undefined variable *" ++ name)
+      Just ts -> return ts
+    errIf (elem source [FnDecl, Builtin]) ("Cannot assign a value to a function: " ++ name)
+    errIf (not $ isPointer t) ("Cannot pointer-assign to a variable that is not a pointer: " ++ name)
+    exprT <- typecheck names expr
+    errIf ((Pointer exprT) /= t) ("Type mismatch for assignment to variable *" ++ name ++ ", type is " ++ show t ++
+                       " but expression is " ++ show exprT)
+    return names
   If test body0 body1 -> do
     testT <- typecheck names test
     errIf (testT /= Int) ("If statement test value must be an Int, got " ++ show testT)
@@ -1017,6 +1025,10 @@ data Type
     | Pointer Type
     deriving (Eq, Show)
 
+isPointer :: Type -> Bool
+isPointer (Pointer _) = True
+isPointer _           = False
+
 fnName :: Function -> (String, (Type, Source))
 fnName (Function name fnT _ _) = (name, (Func fnT, FnDecl))
 
@@ -1195,15 +1207,15 @@ expression :: Parser Expression
 expression = buildExpressionParser operatorTable term
 
 operatorTable =
-    [ [binary "*" Times AssocLeft, binary "/" Divide AssocLeft, binary "%" Mod AssocLeft]
+    [ [prefix "*" Dereference, prefix "&" TakeReference]
+    , [prefix "-" Negate]
+    , [binary "*" Times AssocLeft, binary "/" Divide AssocLeft, binary "%" Mod AssocLeft]
     , [binary "+" Plus AssocLeft, binary "-" Minus AssocLeft]
     , [binary ">" Greater AssocNone, binary "<" Less AssocNone, binary ">=" GEqual AssocNone, binary "<=" LEqual AssocNone]
     , [binary "==" Equal AssocNone, binary "!=" NotEqual AssocNone]
     , [binary "and" And AssocLeft]
     , [binary "or" Or AssocLeft]
     , [prefix "not" Not]
-    , [prefix "-" Negate]
-    , [prefix "*" Dereference, prefix "&" TakeReference]
     ]
     where
       binary name op = Infix (do{ reservedOp name; return (BinaryOp op) })

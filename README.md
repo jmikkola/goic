@@ -62,3 +62,12 @@ A way to try out things in the parser quickly:
 
 - Run `cabal repl` to get a repl
 - Parse something with a command like `parse assignPointer "test" "*n = *n + 1"`
+
+Compiling and running all examples:
+
+```bash
+# compiling
+for F in examples/*.gc; do echo $F; ./goic $F; done
+# running
+for F in examples/*; do if [[ -x $F ]]; then echo $F; ./$F > /dev/null; fi; done
+```

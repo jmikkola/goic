@@ -564,7 +564,7 @@ compileUnaryOp op inner = do
                         , Sete (Register1 AL)
                         , Movzx (Register8 RAX) (Register1 AL) ]
         TakeReference -> undefined -- TODO
-        Dereference -> undefined -- TODO
+        Dereference -> toASM [ Mov (Register8 RAX) (R8Address RAX) ]
   return $ innerAsm ++ operation
 
 compileBinaryOp :: Op -> Expression -> Expression -> Compiler [ASM]

@@ -1,0 +1,30 @@
+module main
+
+func printint(n Int) Void {
+    if n / 10 > 0 {
+        printint(n / 10)
+    }
+    putchar(n % 10 + 48)
+}
+
+func use_pointer(n *Int) Void {
+    printint(*n)
+    putchar(10) // 10 = '\n'
+}
+
+func take_pointer(n Int) Void {
+    use_pointer(&n)
+}
+
+func modify_with_pointer(n *Int) Void {
+    *n = *n + 1
+}
+
+func main() Void {
+    var x Int = 12300
+    var xp *Int = &x
+    modify_with_pointer(xp)
+    take_pointer(x)
+    modify_with_pointer(xp)
+    take_pointer(x)
+}

@@ -134,6 +134,7 @@ data Instr
   | Pop Arg
   | Mov Arg Arg
   | Movzx Arg Arg
+  | Lea Arg Arg
   | Add Arg Arg
   | Sub Arg Arg
   | Mul Arg
@@ -215,6 +216,7 @@ instance Render Instr where
     Push arg  -> "push\t" ++ render arg
     Mov a b   -> "mov\t" ++ render a ++ ", " ++ render b
     Movzx a b -> "movzx\t" ++ render a ++ ", " ++ render b
+    Lea a b   -> "lea\t" ++ render a ++ ", " ++ render b
     Add a b   -> "add\t" ++ render a ++ ", " ++ render b
     Sub a b   -> "sub\t" ++ render a ++ ", " ++ render b
     Mul a     -> "mul\t" ++ render a
@@ -431,6 +433,8 @@ compileStatement statement = case statement of
     compileNewVar name expr
   Assign name expr ->
     compileAssign name expr
+  AssignPtr name expr ->
+    compileAssignPointer name expr
   If expr tcase ecase ->
     compileIf expr tcase ecase
   While test body ->
@@ -453,6 +457,15 @@ compileAssign name expr = do
   exprAsm <- compileExpression expr
   let rbpOffset = offset * (-8)
   let writeVar = [ Instruction $ Mov (R8Offset rbpOffset RBP) (Register8 RAX) ]
+  let instructions = exprAsm ++ writeVar
+  return instructions
+
+compileAssignPointer :: String -> Expression -> Compiler [ASM]
+compileAssignPointer name expr = do
+  offset <- lookupVariableOffset name
+  exprAsm <- compileExpression expr
+  let writeVar = toASM [ Mov (Register8 RBX) (R8Offset offset RBP)
+                       , Mov (R8Address RBX) (Register8 RAX) ]
   let instructions = exprAsm ++ writeVar
   return instructions
 
@@ -554,14 +567,27 @@ compileLiteral value = case value of
     return [Instruction $ Mov (Register8 RAX) (Address varname)]
 
 compileUnaryOp :: Uop -> Expression -> Compiler [ASM]
-compileUnaryOp op inner = do
-  innerAsm <- compileExpression inner
-  let operation = case op of
-        Negate -> toASM [ Neg (Register8 RAX) ]
-        Not    -> toASM [ Cmp (Register8 RAX) (Immediate 0)
-                        , Sete (Register1 AL)
-                        , Movzx (Register8 RAX) (Register1 AL) ]
-  return $ innerAsm ++ operation
+compileUnaryOp op inner = case op of
+  Negate -> do
+    innerAsm <- compileExpression inner
+    let operation = [ Neg (Register8 RAX) ]
+    return $ innerAsm ++ toASM operation
+  Not -> do
+    innerAsm <- compileExpression inner
+    let operation = [ Cmp (Register8 RAX) (Immediate 0)
+                    , Sete (Register1 AL)
+                    , Movzx (Register8 RAX) (Register1 AL) ]
+    return $ innerAsm ++ toASM operation
+  Dereference -> do
+    innerAsm <- compileExpression inner
+    let operation = [ Mov (Register8 RAX) (R8Address RAX) ]
+    return $ innerAsm ++ toASM operation
+  TakeReference -> case inner of
+    Variable name -> do
+      offset <- lookupVariableOffset name
+      let operation = [ Lea (Register8 RAX) (R8Offset offset RBP) ]
+      return $ toASM operation
+    _ -> error "taking a reference to non-variables is not supported yet"
 
 compileBinaryOp :: Op -> Expression -> Expression -> Compiler [ASM]
 compileBinaryOp op left right = case op of
@@ -666,22 +692,26 @@ compileOr left right = do
 
 compileVariable :: String -> Compiler [ASM]
 compileVariable name = do
+  offset <- lookupVariableOffset name
+  return $ toASM [Mov (Register8 RAX) (R8Offset offset RBP)]
+
+lookupVariableOffset :: String -> Compiler Int
+lookupVariableOffset name = do
   state <- get
   case elemIndex name (argNames state) of
     Just idx ->
-      let offset = if idx < 6
-                   -- read args inside this stack frame where they were saved
-                   -- from the registers by this function
-                   then (idx + 1) * (-8)
-                   -- read args from the previous stack frame where they were
-                   -- saved by the caller
-                   -- (-6: ignore the first 6 indexes, +2: skip over where RBP
-                   -- and RIP are stored on the stack)
-                   else (idx - 6 + 2) * 8
-      in return $ toASM [Mov (Register8 RAX) (R8Offset offset RBP)]
-    Nothing  -> do
+      if idx < 6
+         -- read args inside this stack frame where they were saved
+         -- from the registers by this function
+         then return $ (idx + 1) * (-8)
+         -- read args from the previous stack frame where they were
+         -- saved by the caller
+         -- (-6: ignore the first 6 indexes, +2: skip over where RBP
+         -- and RIP are stored on the stack)
+         else return $ (idx - 6 + 2) * 8
+    Nothing -> do
       offset <- lookupLocalVar name
-      return $ toASM [Mov (Register8 RAX) (R8Offset (offset * (-8)) RBP)]
+      return $ offset * (-8)
 
 argRegisters :: [Reg8]
 argRegisters = [RDI, RSI, RDX, RCX, R8, R9]
@@ -825,6 +855,16 @@ checkStatement names returnType stmt = case stmt of
     errIf (exprT /= t) ("Type mismatch for assignment to variable " ++ name ++ ", type is " ++ show t ++
                        " but expression is " ++ show exprT)
     return names
+  AssignPtr name expr -> do
+    (t, source) <- case lookup name names of
+      Nothing -> Left ("Assigning to an undefined variable *" ++ name)
+      Just ts -> return ts
+    errIf (elem source [FnDecl, Builtin]) ("Cannot assign a value to a function: " ++ name)
+    errIf (not $ isPointer t) ("Cannot pointer-assign to a variable that is not a pointer: " ++ name)
+    exprT <- typecheck names expr
+    errIf ((Pointer exprT) /= t) ("Type mismatch for assignment to variable *" ++ name ++ ", type is " ++ show t ++
+                       " but expression is " ++ show exprT)
+    return names
   If test body0 body1 -> do
     testT <- typecheck names test
     errIf (testT /= Int) ("If statement test value must be an Int, got " ++ show testT)
@@ -888,9 +928,22 @@ typecheck names (BinaryOp o l r) = do
               else Left $ "Invalid type for " ++ show o ++ ": " ++ show lType
 typecheck names (UnaryOp o inner) = do
   iType <- typecheck names inner
-  if iType == Int
-    then return Int
-    else Left $ "Invalid type for unary " ++ show o ++ ": " ++ show iType
+  let mustInt =
+        if iType == Int
+          then return Int
+          else Left $ "Invalid type for unary " ++ show o ++ ": " ++ show iType
+  case o of
+    Not           -> mustInt
+    Negate        -> mustInt
+    TakeReference -> do
+      ensureReferenceable names inner
+      return $ Pointer iType
+    Dereference   ->
+      case iType of
+        (Pointer pointed) ->
+          return pointed
+        _                 ->
+         Left $ "Cannot dereference non-pointer type " ++ show iType ++ " in " ++ show o
 typecheck names (Paren e) =
   typecheck names e
 typecheck names (Call e args) = do
@@ -901,6 +954,18 @@ typecheck names (Call e args) = do
     _                                             ->
       Left $ "Cannot call function with type " ++ show fnType ++ " with args of types " ++ show argTypes
 
+ensureReferenceable :: Names -> Expression -> Either Err ()
+ensureReferenceable names expr = case expr of
+  Variable name -> do
+    (_t, source) <- case lookup name names of
+      Nothing -> Left "unexpected undefined variable in ensureReferenceable"
+      Just ts -> return ts
+    errIf (not $ source `elem` [Local, Argument]) ("Taking pointers to non-local is not yet supported: " ++ name)
+    return ()
+  Literal _     ->
+    Left "taking pointers to literals is not supported yet"
+  _             ->
+    Left "taking pointers to the results of expressions is not supported yet"
 
 findDuplicates :: (Ord a) => [a] -> [a]
 findDuplicates items = findDup [] [] items
@@ -931,6 +996,7 @@ data Statement
     | BareReturn
     | NewVar String Type Expression
     | Assign String Expression
+    | AssignPtr String Expression
     | If Expression Statement Statement
     | While Expression Statement
     | Block [Statement]
@@ -969,6 +1035,8 @@ data Op
 data Uop
   = Not
   | Negate
+  | TakeReference
+  | Dereference
   deriving (Eq, Show)
 
 data FnType = FnType [Type] Type
@@ -980,7 +1048,12 @@ data Type
     | Int
     | String
     | Char
+    | Pointer Type
     deriving (Eq, Show)
+
+isPointer :: Type -> Bool
+isPointer (Pointer _) = True
+isPointer _           = False
 
 fnName :: Function -> (String, (Type, Source))
 fnName (Function name fnT _ _) = (name, (Func fnT, FnDecl))
@@ -1075,6 +1148,7 @@ statement = choice
     , try ifParser
     , try newVar
     , try assign
+    , try assignPointer
     , EStatement <$> expression
     ]
 
@@ -1122,6 +1196,14 @@ assign = do
     value <- expression
     return $ Assign varName value
 
+assignPointer :: Parser Statement
+assignPointer = do
+    reservedOp "*"
+    varName <- identifier
+    reservedOp "="
+    value <- expression
+    return $ AssignPtr varName value
+
 -- Type Parsers
 typeParser :: Parser Type
 typeParser = choice
@@ -1130,6 +1212,7 @@ typeParser = choice
     , reserved "String" >> return String
     , reserved "Char"   >> return Char
     , funcType
+    , pointerType
     ]
 
 funcType :: Parser Type
@@ -1139,19 +1222,26 @@ funcType = do
     retType <- typeParser
     return $ Func $ FnType args retType
 
+pointerType :: Parser Type
+pointerType = do
+  reservedOp "*"
+  innerType <- typeParser
+  return $ Pointer innerType
+
 -- Expression Parsers
 expression :: Parser Expression
 expression = buildExpressionParser operatorTable term
 
 operatorTable =
-    [ [binary "*" Times AssocLeft, binary "/" Divide AssocLeft, binary "%" Mod AssocLeft]
+    [ [prefix "*" Dereference, prefix "&" TakeReference]
+    , [prefix "-" Negate]
+    , [binary "*" Times AssocLeft, binary "/" Divide AssocLeft, binary "%" Mod AssocLeft]
     , [binary "+" Plus AssocLeft, binary "-" Minus AssocLeft]
     , [binary ">" Greater AssocNone, binary "<" Less AssocNone, binary ">=" GEqual AssocNone, binary "<=" LEqual AssocNone]
     , [binary "==" Equal AssocNone, binary "!=" NotEqual AssocNone]
     , [binary "and" And AssocLeft]
     , [binary "or" Or AssocLeft]
     , [prefix "not" Not]
-    , [prefix "-" Negate]
     ]
     where
       binary name op = Infix (do{ reservedOp name; return (BinaryOp op) })

@@ -17,7 +17,7 @@ func take_pointer(n Int) Void {
 }
 
 func modify_with_pointer(n *Int) Void {
-//    *n = *n + 1
+    *n = *n + 1
 }
 
 func main() Void {

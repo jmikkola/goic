@@ -1110,6 +1110,7 @@ statement = choice
     , try ifParser
     , try newVar
     , try assign
+    , try assignPointer
     , EStatement <$> expression
     ]
 
@@ -1156,6 +1157,14 @@ assign = do
     reservedOp "="
     value <- expression
     return $ Assign varName value
+
+assignPointer :: Parser Statement
+assignPointer = do
+    reservedOp "*"
+    varName <- identifier
+    reservedOp "="
+    value <- expression
+    return $ AssignPtr varName value
 
 -- Type Parsers
 typeParser :: Parser Type

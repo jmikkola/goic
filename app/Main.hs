@@ -432,7 +432,7 @@ compileStatement statement = case statement of
   Assign name expr ->
     compileAssign name expr
   AssignPtr name expr ->
-    undefined -- TODO
+    compileAssignPointer name expr
   If expr tcase ecase ->
     compileIf expr tcase ecase
   While test body ->
@@ -455,6 +455,16 @@ compileAssign name expr = do
   exprAsm <- compileExpression expr
   let rbpOffset = offset * (-8)
   let writeVar = [ Instruction $ Mov (R8Offset rbpOffset RBP) (Register8 RAX) ]
+  let instructions = exprAsm ++ writeVar
+  return instructions
+
+compileAssignPointer :: String -> Expression -> Compiler [ASM]
+compileAssignPointer name expr = do
+  offset <- lookupLocalVar name
+  exprAsm <- compileExpression expr
+  let rbpOffset = offset * (-8)
+  let writeVar = toASM [ Mov (Register8 RBX) (R8Offset rbpOffset RBP)
+                       , Mov (R8Address RBX) (Register8 RAX) ]
   let instructions = exprAsm ++ writeVar
   return instructions
 

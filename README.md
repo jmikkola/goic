@@ -56,3 +56,10 @@ This depends on having `yasm` installed.
 - Support modules
 
 A crazy stretch goal could be to make the compiler self-host.
+
+# Development notes
+
+A way to try out things in the parser quickly:
+
+- Run `cabal repl` to get a repl
+- Parse something with a command like `parse assignPointer "test" "*n = *n + 1"`

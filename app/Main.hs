@@ -134,6 +134,7 @@ data Instr
   | Pop Arg
   | Mov Arg Arg
   | Movzx Arg Arg
+  | Lea Arg Arg
   | Add Arg Arg
   | Sub Arg Arg
   | Mul Arg
@@ -215,6 +216,7 @@ instance Render Instr where
     Push arg  -> "push\t" ++ render arg
     Mov a b   -> "mov\t" ++ render a ++ ", " ++ render b
     Movzx a b -> "movzx\t" ++ render a ++ ", " ++ render b
+    Lea a b   -> "lea\t" ++ render a ++ ", " ++ render b
     Add a b   -> "add\t" ++ render a ++ ", " ++ render b
     Sub a b   -> "sub\t" ++ render a ++ ", " ++ render b
     Mul a     -> "mul\t" ++ render a
@@ -460,10 +462,9 @@ compileAssign name expr = do
 
 compileAssignPointer :: String -> Expression -> Compiler [ASM]
 compileAssignPointer name expr = do
-  offset <- lookupLocalVar name
+  offset <- lookupVariableOffset name
   exprAsm <- compileExpression expr
-  let rbpOffset = offset * (-8)
-  let writeVar = toASM [ Mov (Register8 RBX) (R8Offset rbpOffset RBP)
+  let writeVar = toASM [ Mov (Register8 RBX) (R8Offset offset RBP)
                        , Mov (R8Address RBX) (Register8 RAX) ]
   let instructions = exprAsm ++ writeVar
   return instructions
@@ -566,16 +567,27 @@ compileLiteral value = case value of
     return [Instruction $ Mov (Register8 RAX) (Address varname)]
 
 compileUnaryOp :: Uop -> Expression -> Compiler [ASM]
-compileUnaryOp op inner = do
-  innerAsm <- compileExpression inner
-  let operation = case op of
-        Negate -> toASM [ Neg (Register8 RAX) ]
-        Not    -> toASM [ Cmp (Register8 RAX) (Immediate 0)
-                        , Sete (Register1 AL)
-                        , Movzx (Register8 RAX) (Register1 AL) ]
-        TakeReference -> undefined -- TODO
-        Dereference -> toASM [ Mov (Register8 RAX) (R8Address RAX) ]
-  return $ innerAsm ++ operation
+compileUnaryOp op inner = case op of
+  Negate -> do
+    innerAsm <- compileExpression inner
+    let operation = [ Neg (Register8 RAX) ]
+    return $ innerAsm ++ toASM operation
+  Not -> do
+    innerAsm <- compileExpression inner
+    let operation = [ Cmp (Register8 RAX) (Immediate 0)
+                    , Sete (Register1 AL)
+                    , Movzx (Register8 RAX) (Register1 AL) ]
+    return $ innerAsm ++ toASM operation
+  Dereference -> do
+    innerAsm <- compileExpression inner
+    let operation = [ Mov (Register8 RAX) (R8Address RAX) ]
+    return $ innerAsm ++ toASM operation
+  TakeReference -> case inner of
+    Variable name -> do
+      offset <- lookupVariableOffset name
+      let operation = [ Lea (Register8 RAX) (R8Offset offset RBP) ]
+      return $ toASM operation
+    _ -> error "taking a reference to non-variables is not supported yet"
 
 compileBinaryOp :: Op -> Expression -> Expression -> Compiler [ASM]
 compileBinaryOp op left right = case op of
@@ -680,22 +692,26 @@ compileOr left right = do
 
 compileVariable :: String -> Compiler [ASM]
 compileVariable name = do
+  offset <- lookupVariableOffset name
+  return $ toASM [Mov (Register8 RAX) (R8Offset offset RBP)]
+
+lookupVariableOffset :: String -> Compiler Int
+lookupVariableOffset name = do
   state <- get
   case elemIndex name (argNames state) of
     Just idx ->
-      let offset = if idx < 6
-                   -- read args inside this stack frame where they were saved
-                   -- from the registers by this function
-                   then (idx + 1) * (-8)
-                   -- read args from the previous stack frame where they were
-                   -- saved by the caller
-                   -- (-6: ignore the first 6 indexes, +2: skip over where RBP
-                   -- and RIP are stored on the stack)
-                   else (idx - 6 + 2) * 8
-      in return $ toASM [Mov (Register8 RAX) (R8Offset offset RBP)]
-    Nothing  -> do
+      if idx < 6
+         -- read args inside this stack frame where they were saved
+         -- from the registers by this function
+         then return $ (idx + 1) * (-8)
+         -- read args from the previous stack frame where they were
+         -- saved by the caller
+         -- (-6: ignore the first 6 indexes, +2: skip over where RBP
+         -- and RIP are stored on the stack)
+         else return $ (idx - 6 + 2) * 8
+    Nothing -> do
       offset <- lookupLocalVar name
-      return $ toASM [Mov (Register8 RAX) (R8Offset (offset * (-8)) RBP)]
+      return $ offset * (-8)
 
 argRegisters :: [Reg8]
 argRegisters = [RDI, RSI, RDX, RCX, R8, R9]

@@ -901,7 +901,8 @@ typecheck names (UnaryOp o inner) = do
   case o of
     Not           -> mustInt
     Negate        -> mustInt
-    TakeReference ->
+    TakeReference -> do
+      ensureReferenceable names inner
       return $ Pointer iType
     Dereference   ->
       case iType of
@@ -919,6 +920,18 @@ typecheck names (Call e args) = do
     _                                             ->
       Left $ "Cannot call function with type " ++ show fnType ++ " with args of types " ++ show argTypes
 
+ensureReferenceable :: Names -> Expression -> Either Err ()
+ensureReferenceable names expr = case expr of
+  Variable name -> do
+    (_t, source) <- case lookup name names of
+      Nothing -> Left "unexpected undefined variable in ensureReferenceable"
+      Just ts -> return ts
+    errIf (not $ source `elem` [Local, Argument]) ("Taking pointers to non-local is not yet supported: " ++ name)
+    return ()
+  Literal _     ->
+    Left "taking pointers to literals is not supported yet"
+  _             ->
+    Left "taking pointers to the results of expressions is not supported yet"
 
 findDuplicates :: (Ord a) => [a] -> [a]
 findDuplicates items = findDup [] [] items

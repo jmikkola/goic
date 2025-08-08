@@ -894,9 +894,21 @@ typecheck names (BinaryOp o l r) = do
               else Left $ "Invalid type for " ++ show o ++ ": " ++ show lType
 typecheck names (UnaryOp o inner) = do
   iType <- typecheck names inner
-  if iType == Int
-    then return Int
-    else Left $ "Invalid type for unary " ++ show o ++ ": " ++ show iType
+  let mustInt =
+        if iType == Int
+          then return Int
+          else Left $ "Invalid type for unary " ++ show o ++ ": " ++ show iType
+  case o of
+    Not           -> mustInt
+    Negate        -> mustInt
+    TakeReference ->
+      return $ Pointer iType
+    Dereference   ->
+      case iType of
+        (Pointer pointed) ->
+          return pointed
+        _                 ->
+         Left $ "Cannot dereference non-pointer type " ++ show iType ++ " in " ++ show o
 typecheck names (Paren e) =
   typecheck names e
 typecheck names (Call e args) = do

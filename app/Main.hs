@@ -140,6 +140,8 @@ data Instr
   | Mul Arg
   | IDiv Arg
   | Neg Arg
+  | Sal Arg Arg
+  | Sar Arg Arg
   | Cqo
   | CallI Arg
   | Cmp Arg Arg
@@ -222,6 +224,8 @@ instance Render Instr where
     Mul a     -> "mul\t" ++ render a
     IDiv a    -> "idiv\t" ++ render a
     Neg a     -> "neg\t" ++ render a
+    Sal a b   -> "sal\t" ++ render a ++ ", " ++ render b
+    Sar a b   -> "sar\t" ++ render a ++ ", " ++ render b
     Cqo       -> "cqo"
     CallI arg -> "call\t" ++ render arg
     Cmp a b   -> "cmp\t" ++ render a ++ ", " ++ render b
@@ -591,21 +595,26 @@ compileUnaryOp op inner = case op of
 
 compileBinaryOp :: Op -> Expression -> Expression -> Compiler [ASM]
 compileBinaryOp op left right = case op of
-  Plus     -> compileBinMath left right [Add (Register8 RAX) (Register8 RBX)]
-  Minus    -> compileBinMath left right [Sub (Register8 RAX) (Register8 RBX)]
-  Times    -> compileBinMath left right [Mul (Register8 RBX)]
-  Divide   -> compileBinMath left right [Cqo, IDiv (Register8 RBX)]
-  Mod      -> compileBinMath left right [ Cqo
-                                        , IDiv (Register8 RBX)
-                                        , Mov (Register8 RAX) (Register8 RDX) ]
-  And      -> compileAnd left right
-  Or       -> compileOr  left right
-  Greater  -> compileBinComp left right Setg
-  Less     -> compileBinComp left right Setl
-  Equal    -> compileBinComp left right Sete
-  GEqual   -> compileBinComp left right Setge
-  LEqual   -> compileBinComp left right Setle
-  NotEqual -> compileBinComp left right Setne
+  Plus       -> compileBinMath left right [Add (Register8 RAX) (Register8 RBX)]
+  Minus      -> compileBinMath left right [Sub (Register8 RAX) (Register8 RBX)]
+  Times      -> compileBinMath left right [Mul (Register8 RBX)]
+  Divide     -> compileBinMath left right [Cqo, IDiv (Register8 RBX)]
+  -- the shift amount can only be in CL, not BL
+  ShiftLeft  -> compileBinMath left right [ Mov (Register8 RCX) (Register8 RBX)
+                                          , Sal (Register8 RAX) (Register1 CL) ]
+  ShiftRight -> compileBinMath left right [ Mov (Register8 RCX) (Register8 RBX)
+                                          , Sar (Register8 RAX) (Register1 CL)]
+  Mod        -> compileBinMath left right [ Cqo
+                                          , IDiv (Register8 RBX)
+                                          , Mov (Register8 RAX) (Register8 RDX) ]
+  And        -> compileAnd left right
+  Or         -> compileOr  left right
+  Greater    -> compileBinComp left right Setg
+  Less       -> compileBinComp left right Setl
+  Equal      -> compileBinComp left right Sete
+  GEqual     -> compileBinComp left right Setge
+  LEqual     -> compileBinComp left right Setle
+  NotEqual   -> compileBinComp left right Setne
 
 -- This is a convenience function for compiling binary values then
 -- running some math instruction[s] on them
@@ -1022,6 +1031,8 @@ data Op
     | Times
     | Divide
     | Mod
+    | ShiftLeft
+    | ShiftRight
     | And
     | Or
     | Greater
@@ -1064,19 +1075,21 @@ instance Render Value where
 
 instance Render Op where
   render op = case op of
-    Plus     -> "+"
-    Minus    -> "-"
-    Times    -> "*"
-    Divide   -> "/"
-    Mod      -> "%"
-    And      -> "and"
-    Or       -> "or"
-    Greater  -> ">"
-    Less     -> "<"
-    Equal    -> "=="
-    GEqual   -> ">="
-    LEqual   -> "<="
-    NotEqual -> "!="
+    Plus       -> "+"
+    Minus      -> "-"
+    Times      -> "*"
+    Divide     -> "/"
+    ShiftLeft  -> "<<"
+    ShiftRight -> ">>"
+    Mod        -> "%"
+    And        -> "and"
+    Or         -> "or"
+    Greater    -> ">"
+    Less       -> "<"
+    Equal      -> "=="
+    GEqual     -> ">="
+    LEqual     -> "<="
+    NotEqual   -> "!="
 
 
 --
@@ -1237,6 +1250,7 @@ operatorTable =
     , [prefix "-" Negate]
     , [binary "*" Times AssocLeft, binary "/" Divide AssocLeft, binary "%" Mod AssocLeft]
     , [binary "+" Plus AssocLeft, binary "-" Minus AssocLeft]
+    , [binary ">>" ShiftRight AssocLeft, binary "<<" ShiftLeft AssocLeft]
     , [binary ">" Greater AssocNone, binary "<" Less AssocNone, binary ">=" GEqual AssocNone, binary "<=" LEqual AssocNone]
     , [binary "==" Equal AssocNone, binary "!=" NotEqual AssocNone]
     , [binary "and" And AssocLeft]

@@ -142,6 +142,7 @@ data Instr
   | AndI Arg Arg
   | XorI Arg Arg
   | OrI Arg Arg
+  | NotI Arg
   | Neg Arg
   | Sal Arg Arg
   | Sar Arg Arg
@@ -229,6 +230,7 @@ instance Render Instr where
     AndI a b  -> "and\t" ++ render a ++ ", " ++ render b
     XorI a b  -> "xor\t" ++ render a ++ ", " ++ render b
     OrI a b   -> "or\t" ++ render a ++ ", " ++ render b
+    NotI a    -> "not\t" ++ render a
     Neg a     -> "neg\t" ++ render a
     Sal a b   -> "sal\t" ++ render a ++ ", " ++ render b
     Sar a b   -> "sar\t" ++ render a ++ ", " ++ render b
@@ -463,10 +465,9 @@ compileNewVar name expr = do
 
 compileAssign :: String -> Expression -> Compiler [ASM]
 compileAssign name expr = do
-  offset <- lookupLocalVar name
+  offset <- lookupVariableOffset name
   exprAsm <- compileExpression expr
-  let rbpOffset = offset * (-8)
-  let writeVar = [ Instruction $ Mov (R8Offset rbpOffset RBP) (Register8 RAX) ]
+  let writeVar = [ Instruction $ Mov (R8Offset offset RBP) (Register8 RAX) ]
   let instructions = exprAsm ++ writeVar
   return instructions
 
@@ -598,6 +599,10 @@ compileUnaryOp op inner = case op of
       let operation = [ Lea (Register8 RAX) (R8Offset offset RBP) ]
       return $ toASM operation
     _ -> error "taking a reference to non-variables is not supported yet"
+  BitNot -> do
+    innerAsm <- compileExpression inner
+    let operation = [NotI (Register8 RAX)]
+    return $ innerAsm ++ toASM operation
 
 compileBinaryOp :: Op -> Expression -> Expression -> Compiler [ASM]
 compileBinaryOp op left right = case op of
@@ -953,6 +958,7 @@ typecheck names (UnaryOp o inner) = do
   case o of
     Not           -> mustInt
     Negate        -> mustInt
+    BitNot        -> mustInt
     TakeReference -> do
       ensureReferenceable names inner
       return $ Pointer iType
@@ -1060,6 +1066,7 @@ data Uop
   | Negate
   | TakeReference
   | Dereference
+  | BitNot
   deriving (Eq, Show)
 
 data FnType = FnType [Type] Type
@@ -1263,6 +1270,7 @@ expression = buildExpressionParser operatorTable term
 operatorTable =
     [ [prefix "*" Dereference, prefix "&" TakeReference]
     , [prefix "-" Negate]
+    , [prefix "not" Not, prefix "~" BitNot]
     , [binary "*" Times AssocLeft, binary "/" Divide AssocLeft, binary "%" Mod AssocLeft]
     , [binary "+" Plus AssocLeft, binary "-" Minus AssocLeft]
     , [binary ">>" ShiftRight AssocLeft, binary "<<" ShiftLeft AssocLeft]
@@ -1273,7 +1281,6 @@ operatorTable =
     , [binary "|" BitOr AssocLeft]
     , [binary "and" And AssocLeft]
     , [binary "or" Or AssocLeft]
-    , [prefix "not" Not]
     ]
     where
       binary name op = Infix (do{ reservedOp name; return (BinaryOp op) })

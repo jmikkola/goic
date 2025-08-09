@@ -44,7 +44,6 @@ This depends on having `yasm` installed.
 
 ## Next
 
-- Add bitwise operators (shifts, masks, invert)
 - Add floats (it would be fun to be able to print the mandelbot set)
 - Add arrays
 - Add structs

@@ -55,6 +55,25 @@ This depends on having `yasm` installed.
 
 A crazy stretch goal could be to make the compiler self-host.
 
+### for building floats
+
+milestone: parse programs with floats
+
+- syntax for the types
+- syntax for the floats themselves (just `floating` in Text.Parsec.Number?)
+
+milestone: handle floats inside of functions
+
+- extend type checking to understand floats
+- change compilation to pay attention to whether the values are floats
+    - how will this info be communicated to the compiler? one idea is to add distinct operations for float math, like PlusFloat, DivFloat, etc
+- add instructions for float operations
+
+milestone: usable floats
+
+- update function calls, function returns, and argument loading to understand floats
+- some way to print them... (should I upgrade the print machinery first?)
+
 # Development notes
 
 A way to try out things in the parser quickly:

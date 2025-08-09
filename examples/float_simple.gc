@@ -1,0 +1,15 @@
+module main
+
+func main() Void {
+    var a Float = 3.14
+    var b Float = 1.0e2
+    var c Float = a * a
+    var d Float = c * c
+    var e Float = b - d
+    if b > 2.788 {
+        print("greater works")
+    }
+    if b < 2.789 {
+        print("less works")
+    }
+}

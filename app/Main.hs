@@ -1076,6 +1076,7 @@ data Type
     = Func FnType
     | Void
     | Int
+    | Float
     | String
     | Char
     | Pointer Type
@@ -1124,7 +1125,7 @@ langDef = emptyDef
     , Token.identLetter     = alphaNum <|> char '_'
     , Token.opStart         = oneOf "+-*/%<>=!&|"
     , Token.opLetter        = oneOf "+-*/%<>=!&|"
-    , Token.reservedNames   = ["module", "func", "return", "while", "if", "else", "var", "Void", "Int", "String", "Char", "Fn"]
+    , Token.reservedNames   = ["module", "func", "return", "while", "if", "else", "var", "Void", "Int", "String", "Char", "Fn", "Float"]
     , Token.reservedOpNames = ["+", "-", "*", "/", "%", "and", "or", "not", ">", "<", "==", ">=", "<=", "!="]
     , Token.commentLine     = "//"
     , Token.commentStart    = "/*"
@@ -1246,6 +1247,7 @@ typeParser = choice
     , reserved "Int"    >> return Int
     , reserved "String" >> return String
     , reserved "Char"   >> return Char
+    , reserved "Float"  >> return Float
     , funcType
     , pointerType
     ]

@@ -139,6 +139,9 @@ data Instr
   | Sub Arg Arg
   | Mul Arg
   | IDiv Arg
+  | AndI Arg Arg
+  | XorI Arg Arg
+  | OrI Arg Arg
   | Neg Arg
   | Sal Arg Arg
   | Sar Arg Arg
@@ -223,6 +226,9 @@ instance Render Instr where
     Sub a b   -> "sub\t" ++ render a ++ ", " ++ render b
     Mul a     -> "mul\t" ++ render a
     IDiv a    -> "idiv\t" ++ render a
+    AndI a b  -> "and\t" ++ render a ++ ", " ++ render b
+    XorI a b  -> "xor\t" ++ render a ++ ", " ++ render b
+    OrI a b   -> "or\t" ++ render a ++ ", " ++ render b
     Neg a     -> "neg\t" ++ render a
     Sal a b   -> "sal\t" ++ render a ++ ", " ++ render b
     Sar a b   -> "sar\t" ++ render a ++ ", " ++ render b
@@ -615,6 +621,9 @@ compileBinaryOp op left right = case op of
   GEqual     -> compileBinComp left right Setge
   LEqual     -> compileBinComp left right Setle
   NotEqual   -> compileBinComp left right Setne
+  BitAnd     -> compileBinMath left right [AndI (Register8 RAX) (Register8 RBX)]
+  BitXor     -> compileBinMath left right [XorI (Register8 RAX) (Register8 RBX)]
+  BitOr      -> compileBinMath left right [OrI (Register8 RAX) (Register8 RBX)]
 
 -- This is a convenience function for compiling binary values then
 -- running some math instruction[s] on them
@@ -1041,6 +1050,9 @@ data Op
     | GEqual
     | LEqual
     | NotEqual
+    | BitAnd
+    | BitXor
+    | BitOr
     deriving (Eq, Show)
 
 data Uop
@@ -1090,6 +1102,9 @@ instance Render Op where
     GEqual     -> ">="
     LEqual     -> "<="
     NotEqual   -> "!="
+    BitAnd     -> "&"
+    BitXor     -> "^"
+    BitOr      -> "|"
 
 
 --
@@ -1253,6 +1268,9 @@ operatorTable =
     , [binary ">>" ShiftRight AssocLeft, binary "<<" ShiftLeft AssocLeft]
     , [binary ">" Greater AssocNone, binary "<" Less AssocNone, binary ">=" GEqual AssocNone, binary "<=" LEqual AssocNone]
     , [binary "==" Equal AssocNone, binary "!=" NotEqual AssocNone]
+    , [binary "&" BitAnd AssocLeft]
+    , [binary "^" BitXor AssocLeft]
+    , [binary "|" BitOr AssocLeft]
     , [binary "and" And AssocLeft]
     , [binary "or" Or AssocLeft]
     , [prefix "not" Not]

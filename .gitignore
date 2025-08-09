@@ -22,3 +22,4 @@ examples/many_args
 examples/pointers
 examples/add
 examples/shifts
+examples/bitwise_operators

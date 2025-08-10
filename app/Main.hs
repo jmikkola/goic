@@ -575,7 +575,7 @@ addString string = do
 compileExpression :: Expression Type -> Compiler [ASM]
 compileExpression expression = case expression of
   Literal value            -> compileLiteral value
-  Variable _ name          -> compileVariable name
+  Variable t name          -> compileVariable t name
   BinaryOp _ op left right -> compileBinaryOp op left right
   UnaryOp  _ op inner      -> compileUnaryOp op inner
   Paren inner              -> compileExpression inner
@@ -761,10 +761,14 @@ compileOr left right = do
         ]
   return $ concat instructions
 
-compileVariable :: String -> Compiler [ASM]
-compileVariable name = do
+compileVariable :: Type -> String -> Compiler [ASM]
+compileVariable t name = do
   offset <- lookupVariableOffset name
-  return $ toASM [Mov (Register8 RAX) (R8Offset offset RBP)]
+  case t of
+    Float ->
+      return $ toASM [Movsd (XMM 0) (R8Offset offset RBP)]
+    _     ->
+      return $ toASM [Mov (Register8 RAX) (R8Offset offset RBP)]
 
 lookupVariableOffset :: String -> Compiler Int
 lookupVariableOffset name = do

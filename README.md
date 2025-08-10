@@ -59,13 +59,6 @@ A crazy stretch goal could be to make the compiler self-host.
 
 milestone: handle floats inside of functions
 
-- change compilation to pay attention to whether the values are floats
-    - how will this info be communicated to the compiler?
-    - All of `compileBinaryOp` will need to change for float:
-        - It needs a different instruction for the actual math or comparison
-          operation
-        - It also needs to use different registers
-    - Maybe I can tag BinaryOp with the discovered type
 - add instructions for float operations
 - Update how variables are loaded and saved
 - Update how the stack is pushed and popped
@@ -94,5 +87,5 @@ Compiling and running all examples:
 # compiling
 for F in examples/*.gc; do echo $F; ./goic $F; done
 # running
-for F in examples/*; do if [[ -x $F ]]; then echo $F; ./$F > /dev/null; fi; done
+for F in examples/*; do if [[ -x $F ]]; then echo $F; ./$F > /dev/null; echo $?; fi; done
 ```

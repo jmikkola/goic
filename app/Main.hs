@@ -156,6 +156,7 @@ data Instr
   | Cqo
   | CallI Arg
   | Cmp Arg Arg
+  | Ucomisd Arg Arg
   | Setl Arg
   | Setg Arg
   | Sete Arg
@@ -252,6 +253,7 @@ instance Render Instr where
     Cqo       -> "cqo"
     CallI arg -> "call\t" ++ render arg
     Cmp a b   -> "cmp\t" ++ render a ++ ", " ++ render b
+    Ucomisd a b -> "ucomisd\t" ++ render a ++ ", " ++ render b
     Setl arg  -> "setl\t" ++ render arg
     Setg arg  -> "setg\t" ++ render arg
     Sete arg  -> "sete\t" ++ render arg
@@ -655,12 +657,24 @@ compileBinaryOp op left right = case op of
                                           , Mov (Register8 RAX) (Register8 RDX) ]
   And        -> compileAnd left right
   Or         -> compileOr  left right
-  Greater    -> compileBinComp left right Setg
-  Less       -> compileBinComp left right Setl
-  Equal      -> compileBinComp left right Sete
-  GEqual     -> compileBinComp left right Setge
-  LEqual     -> compileBinComp left right Setle
-  NotEqual   -> compileBinComp left right Setne
+  Greater    -> case exprType left of
+    Float -> compileFloatComp left right Setg
+    _     -> compileBinComp left right Setg
+  Less       -> case exprType left of
+    Float -> compileFloatComp left right Setl
+    _     -> compileBinComp left right Setl
+  Equal      -> case exprType left of
+    Float -> compileFloatComp left right Sete
+    _     -> compileBinComp left right Sete
+  GEqual     -> case exprType left of
+    Float -> compileFloatComp left right Setge
+    _     -> compileBinComp left right Setge
+  LEqual     -> case exprType left of
+    Float -> compileFloatComp left right Setle
+    _     -> compileBinComp left right Setle
+  NotEqual   -> case exprType left of
+    Float -> compileFloatComp left right Setne
+    _     -> compileBinComp left right Setne
   BitAnd     -> compileBinMath left right [AndI (Register8 RAX) (Register8 RBX)]
   BitXor     -> compileBinMath left right [XorI (Register8 RAX) (Register8 RBX)]
   BitOr      -> compileBinMath left right [OrI (Register8 RAX) (Register8 RBX)]
@@ -681,6 +695,14 @@ compileBinComp :: Expression Type -> Expression Type -> (Arg -> Instr) -> Compil
 compileBinComp left right setInstr = do
   setup <- compileBinaryValues left right
   let instrs = [ Cmp (Register8 RAX) (Register8 RBX)
+               , setInstr (Register1 AL)
+               , Movzx (Register4 EAX) (Register1 AL) ]
+  return $ setup ++ (toASM instrs)
+
+compileFloatComp :: Expression Type -> Expression Type -> (Arg -> Instr) -> Compiler [ASM]
+compileFloatComp left right setInstr = do
+  setup <- compileFloatValues left right
+  let instrs = [ Ucomisd (XMM 0) (XMM 1)
                , setInstr (Register1 AL)
                , Movzx (Register4 EAX) (Register1 AL) ]
   return $ setup ++ (toASM instrs)

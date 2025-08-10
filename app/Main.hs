@@ -474,25 +474,34 @@ compileNewVar name expr = do
   index <- lookupLocalVar name
   exprAsm <- compileExpression expr
   let offset = index * (-8)
-  let writeVar = [ Instruction $ Mov (R8Offset offset RBP) (Register8 RAX) ]
-  let instructions = exprAsm ++ writeVar
+  let writeVar =
+        if exprType expr == Float
+        then [Movsd (R8Offset offset RBP) (XMM 0)]
+        else [Mov (R8Offset offset RBP) (Register8 RAX)]
+  let instructions = exprAsm ++ (toASM writeVar)
   return instructions
 
 compileAssign :: String -> Expression Type -> Compiler [ASM]
 compileAssign name expr = do
   offset <- lookupVariableOffset name
   exprAsm <- compileExpression expr
-  let writeVar = [ Instruction $ Mov (R8Offset offset RBP) (Register8 RAX) ]
-  let instructions = exprAsm ++ writeVar
+  let writeVar =
+        if exprType expr == Float
+        then [Movsd (R8Offset offset RBP) (XMM 0)]
+        else [Mov (R8Offset offset RBP) (Register8 RAX)]
+  let instructions = exprAsm ++ (toASM writeVar)
   return instructions
 
 compileAssignPointer :: String -> Expression Type -> Compiler [ASM]
 compileAssignPointer name expr = do
   offset <- lookupVariableOffset name
   exprAsm <- compileExpression expr
-  let writeVar = toASM [ Mov (Register8 RBX) (R8Offset offset RBP)
-                       , Mov (R8Address RBX) (Register8 RAX) ]
-  let instructions = exprAsm ++ writeVar
+  let getAddress = toASM [Mov (Register8 RBX) (R8Offset offset RBP)]
+  let writeVar =
+        if exprType expr == Float
+        then [Movsd (R8Address RBX) (XMM 0)]
+        else [Mov (R8Address RBX) (Register8 RAX)]
+  let instructions = exprAsm ++ getAddress ++ (toASM writeVar)
   return instructions
 
 lookupLocalVar :: String -> Compiler Int

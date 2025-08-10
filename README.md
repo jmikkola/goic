@@ -57,11 +57,6 @@ A crazy stretch goal could be to make the compiler self-host.
 
 ### for building floats
 
-milestone: parse programs with floats
-
-- syntax for the types
-- syntax for the floats themselves (just `floating` in Text.Parsec.Number?)
-
 milestone: handle floats inside of functions
 
 - extend type checking to understand floats

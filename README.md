@@ -60,13 +60,25 @@ A crazy stretch goal could be to make the compiler self-host.
 milestone: handle floats inside of functions
 
 - change compilation to pay attention to whether the values are floats
-    - how will this info be communicated to the compiler? one idea is to add distinct operations for float math, like PlusFloat, DivFloat, etc
+    - how will this info be communicated to the compiler?
+    - All of `compileBinaryOp` will need to change for float:
+        - It needs a different instruction for the actual math or comparison
+          operation
+        - It also needs to use different registers
+    - Maybe I can tag BinaryOp with the discovered type
 - add instructions for float operations
+- Update how variables are loaded and saved
 
 milestone: usable floats
 
 - update function calls, function returns, and argument loading to understand floats
 - some way to print them... (should I upgrade the print machinery first?)
+
+milestone: casting
+
+- add syntax for casting between floats and ints
+- add typechecking for casts
+- add cast instructions
 
 # Development notes
 

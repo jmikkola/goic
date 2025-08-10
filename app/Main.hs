@@ -136,6 +136,7 @@ data Instr
   | Mov Arg Arg
   | Movzx Arg Arg
   | Movsd Arg Arg
+  | Movq Arg Arg
   | Lea Arg Arg
   | Add Arg Arg
   | Sub Arg Arg
@@ -227,6 +228,7 @@ instance Render Instr where
     Mov a b   -> "mov\t" ++ render a ++ ", " ++ render b
     Movzx a b -> "movzx\t" ++ render a ++ ", " ++ render b
     Movsd a b -> "movsd\t" ++ render a ++ ", " ++ render b
+    Movq a b  -> "movq\t" ++ render a ++ ", " ++ render b
     Lea a b   -> "lea\t" ++ render a ++ ", " ++ render b
     Add a b   -> "add\t" ++ render a ++ ", " ++ render b
     Sub a b   -> "sub\t" ++ render a ++ ", " ++ render b
@@ -582,7 +584,8 @@ compileLiteral value = case value of
     varname <- addString s
     return [Instruction $ Mov (Register8 RAX) (Address varname)]
   VFloat f -> do
-    return $ toASM [ Mov (Register8 RAX) (Immediate $ fromIntegral $ coerceToWord f) ]
+    return $ toASM [ Mov (Register8 RAX) (Immediate $ fromIntegral $ coerceToWord f)
+                   , Movq (XMM 0) (Register8 RAX) ]
 
 compileUnaryOp :: Uop -> Expression -> Compiler [ASM]
 compileUnaryOp op inner = case op of

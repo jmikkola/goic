@@ -142,6 +142,10 @@ data Instr
   | Sub Arg Arg
   | Mul Arg
   | IDiv Arg
+  | Addsd Arg Arg
+  | Subsd Arg Arg
+  | Mulsd Arg Arg
+  | Divsd Arg Arg
   | AndI Arg Arg
   | XorI Arg Arg
   | OrI Arg Arg
@@ -234,6 +238,10 @@ instance Render Instr where
     Sub a b   -> "sub\t" ++ render a ++ ", " ++ render b
     Mul a     -> "mul\t" ++ render a
     IDiv a    -> "idiv\t" ++ render a
+    Addsd a b -> "addsd\t" ++ render a ++ ", " ++ render b
+    Subsd a b -> "subsd\t" ++ render a ++ ", " ++ render b
+    Mulsd a b -> "mulsd\t" ++ render a ++ ", " ++ render b
+    Divsd a b -> "divsd\t" ++ render a ++ ", " ++ render b
     AndI a b  -> "and\t" ++ render a ++ ", " ++ render b
     XorI a b  -> "xor\t" ++ render a ++ ", " ++ render b
     OrI a b   -> "or\t" ++ render a ++ ", " ++ render b
@@ -616,10 +624,18 @@ compileUnaryOp op inner = case op of
 
 compileBinaryOp :: Op -> Expression Type -> Expression Type -> Compiler [ASM]
 compileBinaryOp op left right = case op of
-  Plus       -> compileBinMath left right [Add (Register8 RAX) (Register8 RBX)]
-  Minus      -> compileBinMath left right [Sub (Register8 RAX) (Register8 RBX)]
-  Times      -> compileBinMath left right [Mul (Register8 RBX)]
-  Divide     -> compileBinMath left right [Cqo, IDiv (Register8 RBX)]
+  Plus       -> case exprType left of
+    Float -> compileFloatMath left right [Addsd (XMM 0) (XMM 1)]
+    _     -> compileBinMath   left right [Add (Register8 RAX) (Register8 RBX)]
+  Minus      -> case exprType left of
+    Float -> compileFloatMath left right [Subsd (XMM 0) (XMM 1)]
+    _     -> compileBinMath left right [Sub (Register8 RAX) (Register8 RBX)]
+  Times      -> case exprType left of
+    Float -> compileFloatMath left right [Mulsd (XMM 0) (XMM 1)]
+    _     -> compileBinMath left right [Mul (Register8 RBX)]
+  Divide     -> case exprType left of
+    Float -> compileFloatMath left right [Divsd (XMM 0) (XMM 1)]
+    _     -> compileBinMath left right [Cqo, IDiv (Register8 RBX)]
   -- the shift amount can only be in CL, not BL
   ShiftLeft  -> compileBinMath left right [ Mov (Register8 RCX) (Register8 RBX)
                                           , Sal (Register8 RAX) (Register1 CL) ]
@@ -647,6 +663,11 @@ compileBinMath left right instrs = do
   setup <- compileBinaryValues left right
   return $ setup ++ (toASM instrs)
 
+compileFloatMath :: Expression Type -> Expression Type -> [Instr] -> Compiler [ASM]
+compileFloatMath left right instrs = do
+  setup <- compileFloatValues left right
+  return $ setup ++ (toASM instrs)
+
 compileBinComp :: Expression Type -> Expression Type -> (Arg -> Instr) -> Compiler [ASM]
 compileBinComp left right setInstr = do
   setup <- compileBinaryValues left right
@@ -672,6 +693,23 @@ compileBinaryValues left right = do
         ]
   popStack
   return $ concat [leftInstrs, pushInstrs, rightInstrs, swapAndPopInstrs]
+
+-- creates code that will evaluate both `left` and `right`, and
+-- leave the results in XMM0 and XMM1, respectively
+compileFloatValues :: Expression Type -> Expression Type -> Compiler [ASM]
+compileFloatValues left right = do
+  leftInstrs <- compileExpression left
+  let pushInstrs = toASM [ Sub (Register8 RSP) (Immediate 8)
+                         , Movsd (R8Address RSP) (XMM 0) ]
+
+  pushStack
+  rightInstrs <- compileExpression right
+  popStack
+
+  let swapAndPopInstrs = toASM [ Movsd (R8Address RSP) (XMM 1)
+                               , Add (Register8 RSP) (Immediate 8) ]
+  return $ concat [leftInstrs, pushInstrs, rightInstrs, swapAndPopInstrs]
+
 
 compileAnd :: Expression Type -> Expression Type -> Compiler [ASM]
 compileAnd left right = do

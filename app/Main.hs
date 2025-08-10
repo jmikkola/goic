@@ -64,7 +64,7 @@ parseArgs _   = do
   putErrLn "Usage: goic [filename.gc]"
   exitFailure
 
-parseFile :: SourceName -> String -> IO Module
+parseFile :: SourceName -> String -> IO (Module ())
 parseFile filename content =
   case parse moduleParser filename content of
     Left err -> do
@@ -296,7 +296,7 @@ newLabel = do
   put $ state { labelsUsed = nUsed + 1 }
   return $ "L" ++ show nUsed
 
-compile :: Module -> String -> [ASM]
+compile :: Module Type -> String -> [ASM]
 compile (Module _ functions) filename =
   let (fnTexts, state) = runState (mapM compileFunction functions) emptyCompileState
       dataSection = [Directive "section" [".data"]]
@@ -327,7 +327,7 @@ compileStringDecls strs =
   [ Constant name "db" (show value ++ ", 0")
   | (name, value) <- Map.toList strs ]
 
-compileFunction :: Function -> Compiler [ASM]
+compileFunction :: Function Type -> Compiler [ASM]
 compileFunction (Function name t argNames body) = do
   -- Setup the state for the fuction body
   state <- get
@@ -377,7 +377,7 @@ functionPreamble name =
 
 -- TODO: support optionally saving and restoring the callee-saved registers
 --       that aren't used for arguments
-compileBody :: FnType -> [String] -> Statement -> Compiler [ASM]
+compileBody :: FnType -> [String] -> Statement Type -> Compiler [ASM]
 compileBody t argNames body = do
   let localVarNames = Set.toList $ findLocalVars body
   let localVarOffset = 1 + min (length argRegisters) (length argNames)
@@ -410,7 +410,7 @@ compileBody t argNames body = do
 
   return $ prologue ++ saveArgs ++ reserveLocalSpace ++ compiledBody ++ epilogue ++ end
 
-findLocalVars :: Statement -> Set String
+findLocalVars :: Statement a -> Set String
 findLocalVars stmt = findLV stmt Set.empty
   where findLV st names = case st of
           NewVar name _ _ -> Set.insert name names
@@ -438,7 +438,7 @@ functionEpilogue =
   , Pop $ Register8 $ RBP
   ]
 
-compileStatement :: Statement -> Compiler [ASM]
+compileStatement :: Statement Type -> Compiler [ASM]
 compileStatement statement = case statement of
   EStatement expr -> compileExpression expr
   Return     expr -> do
@@ -461,7 +461,7 @@ compileStatement statement = case statement of
   Block statements ->
     concatMapM compileStatement statements
 
-compileNewVar :: String -> Expression -> Compiler [ASM]
+compileNewVar :: String -> Expression Type -> Compiler [ASM]
 compileNewVar name expr = do
   index <- lookupLocalVar name
   exprAsm <- compileExpression expr
@@ -470,7 +470,7 @@ compileNewVar name expr = do
   let instructions = exprAsm ++ writeVar
   return instructions
 
-compileAssign :: String -> Expression -> Compiler [ASM]
+compileAssign :: String -> Expression Type -> Compiler [ASM]
 compileAssign name expr = do
   offset <- lookupVariableOffset name
   exprAsm <- compileExpression expr
@@ -478,7 +478,7 @@ compileAssign name expr = do
   let instructions = exprAsm ++ writeVar
   return instructions
 
-compileAssignPointer :: String -> Expression -> Compiler [ASM]
+compileAssignPointer :: String -> Expression Type -> Compiler [ASM]
 compileAssignPointer name expr = do
   offset <- lookupVariableOffset name
   exprAsm <- compileExpression expr
@@ -494,7 +494,7 @@ lookupLocalVar name = do
     Nothing -> error ("name should have been defined: " ++ name)
     Just o  -> o
 
-compileWhile :: Expression -> Statement -> Compiler [ASM]
+compileWhile :: Expression Type -> Statement Type -> Compiler [ASM]
 compileWhile test body = do
     startLabel <- newLabel
     endLabel   <- newLabel
@@ -518,7 +518,7 @@ compileWhile test body = do
             ]
     return $ concat results
 
-compileIf :: Expression -> Statement -> Statement -> Compiler [ASM]
+compileIf :: Expression Type -> Statement Type -> Statement Type -> Compiler [ASM]
 -- A special case for an empty else block
 compileIf expr tcase (Block []) = do
   endLabel <- newLabel
@@ -564,7 +564,7 @@ addString string = do
   put (state { strings = strs' })
   return name
 
-compileExpression :: Expression -> Compiler [ASM]
+compileExpression :: Expression Type -> Compiler [ASM]
 compileExpression expression = case expression of
   Literal value            -> compileLiteral value
   Variable _ name          -> compileVariable name
@@ -587,7 +587,7 @@ compileLiteral value = case value of
     return $ toASM [ Mov (Register8 RAX) (Immediate $ fromIntegral $ coerceToWord f)
                    , Movq (XMM 0) (Register8 RAX) ]
 
-compileUnaryOp :: Uop -> Expression -> Compiler [ASM]
+compileUnaryOp :: Uop -> Expression Type -> Compiler [ASM]
 compileUnaryOp op inner = case op of
   Negate -> do
     innerAsm <- compileExpression inner
@@ -614,7 +614,7 @@ compileUnaryOp op inner = case op of
     let operation = [NotI (Register8 RAX)]
     return $ innerAsm ++ toASM operation
 
-compileBinaryOp :: Op -> Expression -> Expression -> Compiler [ASM]
+compileBinaryOp :: Op -> Expression Type -> Expression Type -> Compiler [ASM]
 compileBinaryOp op left right = case op of
   Plus       -> compileBinMath left right [Add (Register8 RAX) (Register8 RBX)]
   Minus      -> compileBinMath left right [Sub (Register8 RAX) (Register8 RBX)]
@@ -642,12 +642,12 @@ compileBinaryOp op left right = case op of
 
 -- This is a convenience function for compiling binary values then
 -- running some math instruction[s] on them
-compileBinMath :: Expression -> Expression -> [Instr] -> Compiler [ASM]
+compileBinMath :: Expression Type -> Expression Type -> [Instr] -> Compiler [ASM]
 compileBinMath left right instrs = do
   setup <- compileBinaryValues left right
   return $ setup ++ (toASM instrs)
 
-compileBinComp :: Expression -> Expression -> (Arg -> Instr) -> Compiler [ASM]
+compileBinComp :: Expression Type -> Expression Type -> (Arg -> Instr) -> Compiler [ASM]
 compileBinComp left right setInstr = do
   setup <- compileBinaryValues left right
   let instrs = [ Cmp (Register8 RAX) (Register8 RBX)
@@ -657,7 +657,7 @@ compileBinComp left right setInstr = do
 
 -- creates code that will evaluate both `left` and `right`, and
 -- leave the results in RAX and RBX, respectively
-compileBinaryValues :: Expression -> Expression -> Compiler [ASM]
+compileBinaryValues :: Expression Type -> Expression Type -> Compiler [ASM]
 compileBinaryValues left right = do
   -- compile the left hand side and push the result on the stack
   leftInstrs <- compileExpression left
@@ -673,7 +673,7 @@ compileBinaryValues left right = do
   popStack
   return $ concat [leftInstrs, pushInstrs, rightInstrs, swapAndPopInstrs]
 
-compileAnd :: Expression -> Expression -> Compiler [ASM]
+compileAnd :: Expression Type -> Expression Type -> Compiler [ASM]
 compileAnd left right = do
   labelFalse <- newLabel
   labelEnd   <- newLabel
@@ -697,7 +697,7 @@ compileAnd left right = do
         ]
   return $ concat instructions
 
-compileOr :: Expression -> Expression -> Compiler [ASM]
+compileOr :: Expression Type -> Expression Type -> Compiler [ASM]
 compileOr left right = do
   labelTrue  <- newLabel
   labelFalse <- newLabel
@@ -749,7 +749,7 @@ lookupVariableOffset name = do
 argRegisters :: [Reg8]
 argRegisters = [RDI, RSI, RDX, RCX, R8, R9]
 
-compileCall :: String -> [Expression] -> Compiler [ASM]
+compileCall :: String -> [Expression Type] -> Compiler [ASM]
 compileCall fnName []   =
   return [Instruction $ CallI (Address fnName)]
 compileCall fnName args = do
@@ -801,7 +801,7 @@ compileCall fnName args = do
 
   return $ argInstrs ++ regFill ++ alignment ++ pushArgs ++ call ++ cleanup
 
-compileArg :: Expression ->  Compiler [ASM]
+compileArg :: Expression Type ->  Compiler [ASM]
 compileArg argExpr = do
   compiled <- compileExpression argExpr
   pushStack
@@ -820,14 +820,14 @@ join j (x:ys) = x ++ j ++ (join j ys)
 -- Type and semantic checks
 --
 
-checkFile :: Module -> IO Module
+checkFile :: Module () -> IO (Module Type)
 checkFile m =
   case checkModule m of
     Left err -> do
       putErrLn err
       exitFailure
-    Right _ ->
-      return m
+    Right typed ->
+      return typed
 
 data Source = Builtin | FnDecl | Argument | Local
   deriving (Eq, Show)
@@ -842,81 +842,82 @@ builtins =
   , ("putchar", (Func $ FnType [Int] Void, Builtin))
   ]
 
-checkModule :: Module -> Either Err ()
-checkModule (Module _ functions) = do
+checkModule :: Module a -> Either Err (Module Type)
+checkModule (Module name functions) = do
   let funcNames = map fnName functions
   let duplicates = findDuplicates (map fst funcNames)
   errIf (not $ null duplicates) ("Duplicate function names: " ++ show duplicates)
   let names = funcNames ++ builtins
-  mapM_ (checkFunction names) functions
+  typedFunctions <- mapM (checkFunction names) functions
+  return $ Module name typedFunctions
 
-checkFunction :: Names -> Function -> Either Err ()
-checkFunction names (Function _ fnt argNames body) = do
+checkFunction :: Names -> Function a -> Either Err (Function Type)
+checkFunction names (Function name fnt argNames body) = do
   let duplicates = findDuplicates argNames
   errIf (not $ null duplicates) ("Duplicate argument names: " ++ show duplicates)
   let (FnType argTypes retType) = fnt
   let theArgs = zip argNames $ zip argTypes $ repeat Argument
-  _ <- checkStatement (theArgs ++ names) retType body
-  return ()
+  (_names, typedBody) <- checkStatement (theArgs ++ names) retType body
+  return $ Function name fnt argNames typedBody
 
-checkStatement :: Names -> Type -> Statement -> Either Err Names
+checkStatement :: Names -> Type -> Statement a -> Either Err (Names, Statement Type)
 checkStatement names returnType stmt = case stmt of
   EStatement expr -> do
-    _ <- typecheck names expr
-    return names
+    (_t, typedExpr) <- typecheck names expr
+    return (names, EStatement typedExpr)
   Return expr -> do
-    t <- typecheck names expr
+    (t, typedExpr) <- typecheck names expr
     errIf (t /= returnType) ("Return type is " ++ show returnType ++ " but return expression is " ++ show t)
-    return names
+    return (names, Return typedExpr)
   BareReturn ->
     if returnType /= Void
       then Left $ "Return type is " ++ show returnType ++ " but return has no expression"
-      else return names
+      else return (names, BareReturn)
   NewVar name t expr -> do
     errIf (hasName name names) ("Duplicate definition of variable " ++ name)
-    exprT <- typecheck names expr
+    (exprT, typedExpr) <- typecheck names expr
     errIf (exprT /= t) ("Type mismatch for declaration of variable " ++ name ++ ", type is " ++ show t ++
       " but expression is " ++ show exprT)
     let names' = (name, (t, Local)) : names
-    return names'
+    return (names', NewVar name t typedExpr)
   Assign name expr -> do
     (t, source) <- case lookup name names of
       Nothing -> Left ("Assigning to an undefined variable " ++ name)
       Just ts -> return ts
     errIf (elem source [FnDecl, Builtin]) ("Cannot assign a value to a function: " ++ name)
-    exprT <- typecheck names expr
+    (exprT, typedExpr) <- typecheck names expr
     errIf (exprT /= t) ("Type mismatch for assignment to variable " ++ name ++ ", type is " ++ show t ++
                        " but expression is " ++ show exprT)
-    return names
+    return (names, Assign name typedExpr)
   AssignPtr name expr -> do
     (t, source) <- case lookup name names of
       Nothing -> Left ("Assigning to an undefined variable *" ++ name)
       Just ts -> return ts
     errIf (elem source [FnDecl, Builtin]) ("Cannot assign a value to a function: " ++ name)
     errIf (not $ isPointer t) ("Cannot pointer-assign to a variable that is not a pointer: " ++ name)
-    exprT <- typecheck names expr
+    (exprT, typedExpr) <- typecheck names expr
     errIf ((Pointer exprT) /= t) ("Type mismatch for assignment to variable *" ++ name ++ ", type is " ++ show t ++
                        " but expression is " ++ show exprT)
-    return names
+    return (names, AssignPtr name typedExpr)
   If test body0 body1 -> do
-    testT <- typecheck names test
+    (testT, testTyped) <- typecheck names test
     errIf (testT /= Int) ("If statement test value must be an Int, got " ++ show testT)
-    _ <- checkStatement names returnType body0
-    _ <- checkStatement names returnType body1
-    return names
+    (_names0, body0Typed) <- checkStatement names returnType body0
+    (_names1, body1Typed) <- checkStatement names returnType body1
+    return (names, If testTyped body0Typed body1Typed)
   While test body -> do
-    testT <- typecheck names test
+    (testT, testTyped) <- typecheck names test
     errIf (testT /= Int) ("While statement test value must be an Int, got " ++ show testT)
-    _ <- checkStatement names returnType body
-    return names
+    (_names, bodyTyped) <- checkStatement names returnType body
+    return (names, While testTyped bodyTyped)
   Block stmts -> do
-    checkStatements names returnType stmts
+    typedStatements <- checkStatements names returnType stmts
     -- return the original names unchanged, because variables declared in the block only exist
     -- inside that block
-    return names
+    return (names, Block typedStatements)
 
-checkStatements :: Names -> Type -> [Statement] -> Either Err ()
-checkStatements _     _ []        = return ()
+checkStatements :: Names -> Type -> [Statement a] -> Either Err [Statement Type]
+checkStatements _     _ []        = return []
 checkStatements names t (s:stmts) = do
   -- check that there aren't statements after an unconditional return
   if not $ null stmts
@@ -926,9 +927,10 @@ checkStatements names t (s:stmts) = do
            _          -> return ()
     else return ()
 
-  names' <- checkStatement names t s
+  (names', sTyped) <- checkStatement names t s
   -- let names declared in the block be used for subsequent statements inside that block
-  checkStatements names' t stmts
+  stmtsTyped <- checkStatements names' t stmts
+  return (sTyped : stmtsTyped)
 
 hasName :: String -> Names -> Bool
 hasName name names = case lookup name names of
@@ -943,24 +945,26 @@ errIf False _   = return ()
 errIf True  err = Left err
 
 
-typecheck :: Names -> Expression -> Either Err Type
-typecheck _     (Literal val)     = Right $ valType val
+typecheck :: Names -> Expression a -> Either Err (Type, Expression Type)
+typecheck _     (Literal val)     =
+  return (valType val, Literal val)
 typecheck names (Variable _ name) = case getType name names of
-  Just t -> Right t
+  Just t  -> return (t, Variable t name)
   Nothing -> Left $ "Variable not defined: " ++ name
 typecheck names (BinaryOp _ o l r) = do
-  lType <- typecheck names l
-  rType <- typecheck names r
+  (lType, lTyped) <- typecheck names l
+  (rType, rTyped) <- typecheck names r
   errIf (lType /= rType)
     ("Type mismatch for " ++ show o ++ ": " ++ show lType ++ " and " ++ show rType)
   errIf (not $ binOpSupportsType o lType)
     ("Invalid type for " ++ show o ++ ": " ++ show lType)
-  return $ binOpResultType o lType
+  let resultType = binOpResultType o lType
+  return (resultType, BinaryOp resultType o lTyped rTyped)
 typecheck names (UnaryOp _ o inner) = do
-  iType <- typecheck names inner
+  (iType, innerTyped) <- typecheck names inner
   let mustInt =
         if iType == Int
-          then return Int
+          then return (Int, UnaryOp Int o innerTyped)
           else Left $ "Invalid type for unary " ++ show o ++ ": " ++ show iType
   case o of
     Not           -> mustInt
@@ -968,24 +972,28 @@ typecheck names (UnaryOp _ o inner) = do
     BitNot        -> mustInt
     TakeReference -> do
       ensureReferenceable names inner
-      return $ Pointer iType
+      let resultType = Pointer iType
+      return (resultType, UnaryOp resultType o innerTyped)
     Dereference   ->
       case iType of
         (Pointer pointed) ->
-          return pointed
+          return (pointed, UnaryOp pointed o innerTyped)
         _                 ->
          Left $ "Cannot dereference non-pointer type " ++ show iType ++ " in " ++ show o
-typecheck names (Paren e) =
-  typecheck names e
+typecheck names (Paren e) = do
+  (t, eTyped) <- typecheck names e
+  return (t, Paren eTyped)
 typecheck names (Call _ e args) = do
-  fnType <- typecheck names e
-  argTypes <- mapM (typecheck names) args
+  (fnType, fnTyped) <- typecheck names e
+  argsAndTypes <- mapM (typecheck names) args
+  let (argTypes, argsTyped) = unzip argsAndTypes
   case fnType of
-    (Func (FnType fargs ret)) | fargs == argTypes -> Right ret
+    (Func (FnType fargs ret)) | fargs == argTypes ->
+      Right (ret, Call ret fnTyped argsTyped)
     _                                             ->
       Left $ "Cannot call function with type " ++ show fnType ++ " with args of types " ++ show argTypes
 
-ensureReferenceable :: Names -> Expression -> Either Err ()
+ensureReferenceable :: Names -> Expression a -> Either Err ()
 ensureReferenceable names expr = case expr of
   Variable _ name -> do
     (_t, source) <- case lookup name names of
@@ -1012,44 +1020,41 @@ findDuplicates items = findDup [] [] items
 -- Define the types for the language's AST
 --
 
-data Program = Program [Module]
+data Module a = Module String [Function a]
     deriving (Show)
 
-data Module = Module String [Function]
+data Function a = Function String FnType [String] (Statement a)
     deriving (Show)
 
-data Function = Function String FnType [String] Statement
-    deriving (Show)
-
-data Statement
-    = EStatement Expression
-    | Return Expression
+data Statement a
+    = EStatement (Expression a)
+    | Return (Expression a)
     | BareReturn
-    | NewVar String Type Expression
-    | Assign String Expression
-    | AssignPtr String Expression
-    | If Expression Statement Statement
-    | While Expression Statement
-    | Block [Statement]
+    | NewVar String Type (Expression a)
+    | Assign String (Expression a)
+    | AssignPtr String (Expression a)
+    | If (Expression a) (Statement a) (Statement a)
+    | While (Expression a) (Statement a)
+    | Block [Statement a]
     deriving (Show)
 
-data Expression
+data Expression a
     = Literal Value
-    | Variable (Maybe Type) String
-    | BinaryOp (Maybe Type) Op Expression Expression
-    | UnaryOp  (Maybe Type) Uop Expression
-    | Paren Expression
-    | Call (Maybe Type) Expression [Expression]
+    | Variable a String
+    | BinaryOp a Op (Expression a) (Expression a)
+    | UnaryOp  a Uop (Expression a)
+    | Paren (Expression a)
+    | Call a (Expression a) [Expression a]
     deriving (Show)
 
-exprType :: Expression -> Maybe Type
+exprType :: Expression Type -> Type
 exprType expr = case expr of
-  Literal val       -> Just $ valType val
-  Variable mt _     -> mt
-  BinaryOp mt _ _ _ -> mt
-  UnaryOp  mt _ _   -> mt
-  Paren e           -> exprType e
-  Call     mt _ _   -> mt
+  Literal val      -> valType val
+  Variable t _     -> t
+  BinaryOp t _ _ _ -> t
+  UnaryOp  t _ _   -> t
+  Paren e          -> exprType e
+  Call     t _ _   -> t
 
 data Value
     = VInt Int
@@ -1125,7 +1130,7 @@ isPointer :: Type -> Bool
 isPointer (Pointer _) = True
 isPointer _           = False
 
-fnName :: Function -> (String, (Type, Source))
+fnName :: Function a -> (String, (Type, Source))
 fnName (Function name fnT _ _) = (name, (Func fnT, FnDecl))
 
 instance Render Value where
@@ -1188,7 +1193,7 @@ float         = Token.float lexer
 stringLiteral = Token.stringLiteral lexer
 
 -- Module Parser
-moduleParser :: Parser Module
+moduleParser :: Parser (Module ())
 moduleParser = do
     whiteSpace
     reserved "module"
@@ -1198,7 +1203,7 @@ moduleParser = do
     return $ Module name functions
 
 -- Function Parser
-function :: Parser Function
+function :: Parser (Function ())
 function = do
     reserved "func"
     name <- identifier
@@ -1216,7 +1221,7 @@ typedArg = do
     return (name, t)
 
 -- Statement Parsers
-statement :: Parser Statement
+statement :: Parser (Statement ())
 statement = choice
     [ try block
     , try returnParser
@@ -1229,25 +1234,25 @@ statement = choice
     , EStatement <$> expression
     ]
 
-block :: Parser Statement
+block :: Parser (Statement ())
 block = Block <$> braces (sepEndBy statement (optional $ char '\n'))
 
-returnParser :: Parser Statement
+returnParser :: Parser (Statement ())
 returnParser = do
     reserved "return"
     Return <$> expression
 
-bareReturn :: Parser Statement
+bareReturn :: Parser (Statement ())
 bareReturn = reserved "return" >> return BareReturn
 
-while :: Parser Statement
+while :: Parser (Statement ())
 while = do
     reserved "while"
     condition <- expression
     body <- block
     return $ While condition body
 
-ifParser :: Parser Statement
+ifParser :: Parser (Statement ())
 ifParser = do
     reserved "if"
     condition <- expression
@@ -1257,7 +1262,7 @@ ifParser = do
         block <|> ifParser -- allows for "else if"
     return $ If condition body else_
 
-newVar :: Parser Statement
+newVar :: Parser (Statement ())
 newVar = do
     reserved "var"
     varName <- identifier
@@ -1266,14 +1271,14 @@ newVar = do
     value <- expression
     return $ NewVar varName varType value
 
-assign :: Parser Statement
+assign :: Parser (Statement ())
 assign = do
     varName <- identifier
     reservedOp "="
     value <- expression
     return $ Assign varName value
 
-assignPointer :: Parser Statement
+assignPointer :: Parser (Statement ())
 assignPointer = do
     reservedOp "*"
     varName <- identifier
@@ -1307,7 +1312,7 @@ pointerType = do
   return $ Pointer innerType
 
 -- Expression Parsers
-expression :: Parser Expression
+expression :: Parser (Expression ())
 expression = buildExpressionParser operatorTable term
 
 operatorTable =
@@ -1326,27 +1331,27 @@ operatorTable =
     , [binary "or" Or AssocLeft]
     ]
     where
-      binary name op = Infix (do{ reservedOp name; return (BinaryOp Nothing op) })
-      prefix name unop = Prefix (do{ reservedOp name; return (UnaryOp Nothing unop) })
+      binary name op = Infix (do{ reservedOp name; return (BinaryOp () op) })
+      prefix name unop = Prefix (do{ reservedOp name; return (UnaryOp () unop) })
 
-term :: Parser Expression
+term :: Parser (Expression ())
 term = choice
     [ try (Paren <$> parens expression)
     , try call
     , Literal <$> valueParser
-    , Variable Nothing <$> identifier
+    , Variable () <$> identifier
     ]
 
-call :: Parser Expression
+call :: Parser (Expression ())
 call = do
     name <- identifier
     args <- parens (commaSep expression)
-    return $ Call Nothing (Variable Nothing name) args
+    return $ Call () (Variable () name) args
 
 -- Value and Literal Parsers
 valueParser :: Parser Value
 valueParser = choice
-    [ VFloat <$> float
+    [ try (VFloat <$> float)
     , VInt . fromInteger <$> integer
     , VString <$> stringLiteral
     ]

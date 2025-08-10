@@ -2,6 +2,7 @@ module Main where
 
 import Control.Monad.Extra (concatMapM)
 import Control.Monad.State (State, get, put, runState)
+import Data.Bits.Floating (coerceToWord)
 import Data.Char (toLower)
 import Data.List (elemIndex)
 import Data.Map (Map)
@@ -134,6 +135,7 @@ data Instr
   | Pop Arg
   | Mov Arg Arg
   | Movzx Arg Arg
+  | Movsd Arg Arg
   | Lea Arg Arg
   | Add Arg Arg
   | Sub Arg Arg
@@ -173,6 +175,7 @@ data Arg
   | R8Index Reg8 Reg8
   | R8Scaled Reg8 Reg8 Int
   | R8ScaledOffset Int Reg8 Reg8 Int
+  | XMM Int
   deriving (Eq, Show)
 
 data Reg8 = RAX | RBX | RCX | RDX | RSI | RDI | RSP | RBP | R8 | R9 | R10 | R11 | R12 | R13 | R14 | R15
@@ -214,6 +217,7 @@ instance Render Arg where
       "qword [" ++ render r ++ "+" ++ render index ++ "*" ++ show scale ++ "]"
     R8ScaledOffset offset r index scale ->
       "qword [" ++ render r ++ "+" ++ render index ++ "*" ++ show scale ++ "+" ++ show offset ++ "]"
+    XMM n -> "xmm" ++ show n
 
 instance Render Instr where
   render instr = case instr of
@@ -222,6 +226,7 @@ instance Render Instr where
     Push arg  -> "push\t" ++ render arg
     Mov a b   -> "mov\t" ++ render a ++ ", " ++ render b
     Movzx a b -> "movzx\t" ++ render a ++ ", " ++ render b
+    Movsd a b -> "movsd\t" ++ render a ++ ", " ++ render b
     Lea a b   -> "lea\t" ++ render a ++ ", " ++ render b
     Add a b   -> "add\t" ++ render a ++ ", " ++ render b
     Sub a b   -> "sub\t" ++ render a ++ ", " ++ render b
@@ -576,6 +581,9 @@ compileLiteral value = case value of
   VString s -> do
     varname <- addString s
     return [Instruction $ Mov (Register8 RAX) (Address varname)]
+  VFloat f -> do
+    return $ toASM [ Mov (Register8 RAX) (Immediate $ fromIntegral $ coerceToWord f)
+                   , Movsd (XMM 0) (Register8 RAX) ]
 
 compileUnaryOp :: Uop -> Expression -> Compiler [ASM]
 compileUnaryOp op inner = case op of
@@ -937,6 +945,7 @@ typecheck :: Names -> Expression -> Either Err Type
 typecheck _     (Literal val)   = Right $ case val of
   VInt    _ -> Int
   VString _ -> String
+  VFloat  _ -> Float
 typecheck names (Variable name) = case getType name names of
   Just t -> Right t
   Nothing -> Left $ "Variable not defined: " ++ name
@@ -1091,8 +1100,9 @@ fnName :: Function -> (String, (Type, Source))
 fnName (Function name fnT _ _) = (name, (Func fnT, FnDecl))
 
 instance Render Value where
-  render (VInt i) = show i
+  render (VInt i)    = show i
   render (VString s) = show s
+  render (VFloat f)  = show f
 
 instance Render Op where
   render op = case op of

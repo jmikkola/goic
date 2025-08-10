@@ -59,7 +59,6 @@ A crazy stretch goal could be to make the compiler self-host.
 
 milestone: handle floats inside of functions
 
-- extend type checking to understand floats
 - change compilation to pay attention to whether the values are floats
     - how will this info be communicated to the compiler? one idea is to add distinct operations for float math, like PlusFloat, DivFloat, etc
 - add instructions for float operations

@@ -7,9 +7,9 @@ func main() Void {
     var d Float = c * c
     var e Float = b - d
     if e > 2.788 {
-        print("greater works")
+        puts("greater works")
     }
     if e < 2.789 {
-        print("less works")
+        puts("less works")
     }
 }

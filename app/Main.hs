@@ -582,8 +582,7 @@ compileLiteral value = case value of
     varname <- addString s
     return [Instruction $ Mov (Register8 RAX) (Address varname)]
   VFloat f -> do
-    return $ toASM [ Mov (Register8 RAX) (Immediate $ fromIntegral $ coerceToWord f)
-                   , Movsd (XMM 0) (Register8 RAX) ]
+    return $ toASM [ Mov (Register8 RAX) (Immediate $ fromIntegral $ coerceToWord f) ]
 
 compileUnaryOp :: Uop -> Expression -> Compiler [ASM]
 compileUnaryOp op inner = case op of
@@ -952,12 +951,11 @@ typecheck names (Variable name) = case getType name names of
 typecheck names (BinaryOp o l r) = do
   lType <- typecheck names l
   rType <- typecheck names r
-  if lType /= rType
-    then Left $ "Type mismatch for " ++ show o ++ ": " ++ show lType ++ " and " ++ show rType
-    else if lType == Int then Right Int
-         else if lType == String && o == Plus
-              then Right String
-              else Left $ "Invalid type for " ++ show o ++ ": " ++ show lType
+  errIf (lType /= rType)
+    ("Type mismatch for " ++ show o ++ ": " ++ show lType ++ " and " ++ show rType)
+  errIf (not $ binOpSupportsType o lType)
+    ("Invalid type for " ++ show o ++ ": " ++ show lType)
+  return $ binOpResultType o lType
 typecheck names (UnaryOp o inner) = do
   iType <- typecheck names inner
   let mustInt =
@@ -1070,6 +1068,22 @@ data Op
     | BitXor
     | BitOr
     deriving (Eq, Show)
+
+binOpSupportsType :: Op -> Type -> Bool
+binOpSupportsType op Int =
+  elem op [ Plus, Minus, Times, Divide, Mod, ShiftLeft, ShiftRight
+          , And, Or, Greater, Less, Equal, GEqual, LEqual, NotEqual
+          , BitAnd, BitXor, BitOr ]
+binOpSupportsType op Float =
+  elem op [ Plus, Minus, Times, Divide
+          , Greater, Less, Equal, GEqual, LEqual, NotEqual ]
+binOpSupportsType op _ =
+  elem op [ Equal, NotEqual ]
+
+binOpResultType :: Op -> Type -> Type
+binOpResultType op inputType =
+  let isComparison = elem op [ Greater, Less, Equal, GEqual, LEqual, NotEqual ]
+  in if isComparison then Int else inputType
 
 data Uop
   = Not

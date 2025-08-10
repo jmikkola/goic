@@ -68,6 +68,7 @@ milestone: handle floats inside of functions
     - Maybe I can tag BinaryOp with the discovered type
 - add instructions for float operations
 - Update how variables are loaded and saved
+- Update how the stack is pushed and popped
 
 milestone: usable floats
 

@@ -566,15 +566,15 @@ addString string = do
 
 compileExpression :: Expression -> Compiler [ASM]
 compileExpression expression = case expression of
-  Literal value          -> compileLiteral value
-  Variable name          -> compileVariable name
-  BinaryOp op left right -> compileBinaryOp op left right
-  UnaryOp op inner       -> compileUnaryOp op inner
-  Paren inner            -> compileExpression inner
-  Call function args     -> case function of
+  Literal value            -> compileLiteral value
+  Variable _ name          -> compileVariable name
+  BinaryOp _ op left right -> compileBinaryOp op left right
+  UnaryOp  _ op inner      -> compileUnaryOp op inner
+  Paren inner              -> compileExpression inner
+  Call _ function args     -> case function of
     -- TODO: Ensure that `fnName` refers to a function not a local or argument
-    Variable fnName -> compileCall fnName args
-    _               -> error "cannot handle function pointers yet"
+    Variable _ fnName -> compileCall fnName args
+    _                 -> error "cannot handle function pointers yet"
 
 compileLiteral :: Value -> Compiler [ASM]
 compileLiteral value = case value of
@@ -604,7 +604,7 @@ compileUnaryOp op inner = case op of
     let operation = [ Mov (Register8 RAX) (R8Address RAX) ]
     return $ innerAsm ++ toASM operation
   TakeReference -> case inner of
-    Variable name -> do
+    Variable _ name -> do
       offset <- lookupVariableOffset name
       let operation = [ Lea (Register8 RAX) (R8Offset offset RBP) ]
       return $ toASM operation
@@ -944,14 +944,11 @@ errIf True  err = Left err
 
 
 typecheck :: Names -> Expression -> Either Err Type
-typecheck _     (Literal val)   = Right $ case val of
-  VInt    _ -> Int
-  VString _ -> String
-  VFloat  _ -> Float
-typecheck names (Variable name) = case getType name names of
+typecheck _     (Literal val)     = Right $ valType val
+typecheck names (Variable _ name) = case getType name names of
   Just t -> Right t
   Nothing -> Left $ "Variable not defined: " ++ name
-typecheck names (BinaryOp o l r) = do
+typecheck names (BinaryOp _ o l r) = do
   lType <- typecheck names l
   rType <- typecheck names r
   errIf (lType /= rType)
@@ -959,7 +956,7 @@ typecheck names (BinaryOp o l r) = do
   errIf (not $ binOpSupportsType o lType)
     ("Invalid type for " ++ show o ++ ": " ++ show lType)
   return $ binOpResultType o lType
-typecheck names (UnaryOp o inner) = do
+typecheck names (UnaryOp _ o inner) = do
   iType <- typecheck names inner
   let mustInt =
         if iType == Int
@@ -980,7 +977,7 @@ typecheck names (UnaryOp o inner) = do
          Left $ "Cannot dereference non-pointer type " ++ show iType ++ " in " ++ show o
 typecheck names (Paren e) =
   typecheck names e
-typecheck names (Call e args) = do
+typecheck names (Call _ e args) = do
   fnType <- typecheck names e
   argTypes <- mapM (typecheck names) args
   case fnType of
@@ -990,15 +987,15 @@ typecheck names (Call e args) = do
 
 ensureReferenceable :: Names -> Expression -> Either Err ()
 ensureReferenceable names expr = case expr of
-  Variable name -> do
+  Variable _ name -> do
     (_t, source) <- case lookup name names of
       Nothing -> Left "unexpected undefined variable in ensureReferenceable"
       Just ts -> return ts
     errIf (not $ source `elem` [Local, Argument]) ("Taking pointers to non-local is not yet supported: " ++ name)
     return ()
-  Literal _     ->
+  Literal _       ->
     Left "taking pointers to literals is not supported yet"
-  _             ->
+  _               ->
     Left "taking pointers to the results of expressions is not supported yet"
 
 findDuplicates :: (Ord a) => [a] -> [a]
@@ -1038,18 +1035,33 @@ data Statement
 
 data Expression
     = Literal Value
-    | Variable String
-    | BinaryOp Op Expression Expression
-    | UnaryOp Uop Expression
+    | Variable (Maybe Type) String
+    | BinaryOp (Maybe Type) Op Expression Expression
+    | UnaryOp  (Maybe Type) Uop Expression
     | Paren Expression
-    | Call Expression [Expression]
+    | Call (Maybe Type) Expression [Expression]
     deriving (Show)
+
+exprType :: Expression -> Maybe Type
+exprType expr = case expr of
+  Literal val       -> Just $ valType val
+  Variable mt _     -> mt
+  BinaryOp mt _ _ _ -> mt
+  UnaryOp  mt _ _   -> mt
+  Paren e           -> exprType e
+  Call     mt _ _   -> mt
 
 data Value
     = VInt Int
     | VFloat Double
     | VString String
     deriving (Show)
+
+valType :: Value -> Type
+valType val = case val of
+  VInt    _ -> Int
+  VFloat  _ -> Float
+  VString _ -> String
 
 data Op
     = Plus
@@ -1314,22 +1326,22 @@ operatorTable =
     , [binary "or" Or AssocLeft]
     ]
     where
-      binary name op = Infix (do{ reservedOp name; return (BinaryOp op) })
-      prefix name unop = Prefix (do{ reservedOp name; return (UnaryOp unop) })
+      binary name op = Infix (do{ reservedOp name; return (BinaryOp Nothing op) })
+      prefix name unop = Prefix (do{ reservedOp name; return (UnaryOp Nothing unop) })
 
 term :: Parser Expression
 term = choice
     [ try (Paren <$> parens expression)
     , try call
     , Literal <$> valueParser
-    , Variable <$> identifier
+    , Variable Nothing <$> identifier
     ]
 
 call :: Parser Expression
 call = do
     name <- identifier
     args <- parens (commaSep expression)
-    return $ Call (Variable name) args
+    return $ Call Nothing (Variable Nothing name) args
 
 -- Value and Literal Parsers
 valueParser :: Parser Value

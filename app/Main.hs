@@ -1037,6 +1037,7 @@ data Expression
 
 data Value
     = VInt Int
+    | VFloat Double
     | VString String
     deriving (Show)
 
@@ -1144,6 +1145,7 @@ braces        = Token.braces lexer
 commaSep      = Token.commaSep lexer
 whiteSpace    = Token.whiteSpace lexer
 integer       = Token.integer lexer
+float         = Token.float lexer
 stringLiteral = Token.stringLiteral lexer
 
 -- Module Parser
@@ -1305,6 +1307,7 @@ call = do
 -- Value and Literal Parsers
 valueParser :: Parser Value
 valueParser = choice
-    [ VInt . fromInteger <$> integer
+    [ VFloat <$> float
+    , VInt . fromInteger <$> integer
     , VString <$> stringLiteral
     ]

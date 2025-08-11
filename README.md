@@ -57,12 +57,6 @@ A crazy stretch goal could be to make the compiler self-host.
 
 ### for building floats
 
-milestone: handle floats inside of functions
-
-- add instructions for float operations
-- Update how variables are loaded and saved
-- Update how the stack is pushed and popped
-
 milestone: usable floats
 
 - update function calls, function returns, and argument loading to understand floats

@@ -158,10 +158,14 @@ data Instr
   | Cmp Arg Arg
   | Ucomisd Arg Arg
   | Setl Arg
+  | Setb Arg
   | Setg Arg
+  | Seta Arg
   | Sete Arg
   | Setge Arg
+  | Setae Arg
   | Setle Arg
+  | Setbe Arg
   | Setne Arg
   | Jmp String
   | Je String
@@ -255,10 +259,14 @@ instance Render Instr where
     Cmp a b   -> "cmp\t" ++ render a ++ ", " ++ render b
     Ucomisd a b -> "ucomisd\t" ++ render a ++ ", " ++ render b
     Setl arg  -> "setl\t" ++ render arg
+    Setb arg  -> "setb\t" ++ render arg
     Setg arg  -> "setg\t" ++ render arg
+    Seta arg  -> "seta\t" ++ render arg
     Sete arg  -> "sete\t" ++ render arg
     Setge arg -> "setge\t" ++ render arg
+    Setae arg -> "setae\t" ++ render arg
     Setle arg -> "setle\t" ++ render arg
+    Setbe arg -> "setbe\t" ++ render arg
     Setne arg -> "setne\t" ++ render arg
     Jmp l     -> "jmp\t" ++ l
     Je l      -> "je\t" ++ l
@@ -658,19 +666,19 @@ compileBinaryOp op left right = case op of
   And        -> compileAnd left right
   Or         -> compileOr  left right
   Greater    -> case exprType left of
-    Float -> compileFloatComp left right Setg
+    Float -> compileFloatComp left right Seta
     _     -> compileBinComp left right Setg
   Less       -> case exprType left of
-    Float -> compileFloatComp left right Setl
+    Float -> compileFloatComp left right Setb
     _     -> compileBinComp left right Setl
   Equal      -> case exprType left of
     Float -> compileFloatComp left right Sete
     _     -> compileBinComp left right Sete
   GEqual     -> case exprType left of
-    Float -> compileFloatComp left right Setge
+    Float -> compileFloatComp left right Setae
     _     -> compileBinComp left right Setge
   LEqual     -> case exprType left of
-    Float -> compileFloatComp left right Setle
+    Float -> compileFloatComp left right Setbe
     _     -> compileBinComp left right Setle
   NotEqual   -> case exprType left of
     Float -> compileFloatComp left right Setne

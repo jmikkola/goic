@@ -737,7 +737,8 @@ compileFloatValues left right = do
   rightInstrs <- compileExpression right
   popStack
 
-  let swapAndPopInstrs = toASM [ Movsd (R8Address RSP) (XMM 1)
+  let swapAndPopInstrs = toASM [ Movsd (XMM 1) (XMM 0)
+                               , Movsd (XMM 0) (R8Address RSP)
                                , Add (Register8 RSP) (Immediate 8) ]
   return $ concat [leftInstrs, pushInstrs, rightInstrs, swapAndPopInstrs]
 

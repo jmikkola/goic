@@ -291,6 +291,7 @@ data CompileState =
   , argNames           :: [String]
   , localVars          :: Map String Int -- local var offsets
   , stackDepth         :: Int
+  , functionTypes      :: Map String FnType
   }
   deriving (Show)
 
@@ -305,6 +306,7 @@ emptyCompileState =
   , argNames           = []
   , localVars          = Map.empty
   , stackDepth         = 0
+  , functionTypes      = Map.empty
   }
 
 newLabel :: Compiler String
@@ -316,7 +318,9 @@ newLabel = do
 
 compile :: Module Type -> String -> [ASM]
 compile (Module _ functions) filename =
-  let (fnTexts, state) = runState (mapM compileFunction functions) emptyCompileState
+  let funcTypeMap = Map.fromList [(name, t) | (Function name t _ _) <- functions]
+      startingState = emptyCompileState { functionTypes = funcTypeMap }
+      (fnTexts, state) = runState (mapM compileFunction functions) emptyCompileState
       dataSection = [Directive "section" [".data"]]
       stringDecls = compileStringDecls (strings state)
       textSection = [Directive "section" [".text"]]
@@ -835,7 +839,12 @@ compileCall :: String -> [Expression Type] -> Compiler [ASM]
 compileCall fnName []   =
   return [Instruction $ CallI (Address fnName)]
 compileCall fnName args = do
+  state <- get
+  let Just (FnType argTypes _) = Map.lookup fnName (functionTypes state)
+
   let nArgs = length args
+  let argPassingPlan = argPassing argTypes
+
   -- Push all N arguments on to the stack, left to right
   argInstrs <- concatMapM compileArg args
 
@@ -882,6 +891,26 @@ compileCall fnName args = do
   changeStackDepth (-popSize)
 
   return $ argInstrs ++ regFill ++ alignment ++ pushArgs ++ call ++ cleanup
+
+data ArgPassing
+  = ArgPassing { registerArgs :: [(Int, Reg8)]
+               , floatingArgs :: [(Int, Int)]
+               , stackArgs    :: [Int]
+               }
+  deriving (Show)
+
+argPassing :: [Type] -> ArgPassing
+argPassing types = ArgPassing { registerArgs = regArgs, floatingArgs = flArgs, stackArgs = other }
+  where indexedArgs = zip [0..] types
+        floating = [i | (i,t) <- indexedArgs, t == Float]
+        integer  = [i | (i,t) <- indexedArgs, t /= Float]
+
+        xmm  = take 8 floating
+        regs = take 6 integer
+
+        regArgs = zip regs argRegisters
+        flArgs  = zip xmm  [0..]
+        other   = [i | (i,_) <- indexedArgs, not (i `elem` xmm || i `elem` regs)]
 
 compileArg :: Expression Type ->  Compiler [ASM]
 compileArg argExpr = do

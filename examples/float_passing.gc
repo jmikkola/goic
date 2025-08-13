@@ -1,0 +1,9 @@
+module main
+
+func main() Void {
+    var result Float = square(0.5)
+}
+
+func square(x Float) Float {
+    return x * x
+}

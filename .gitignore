@@ -25,3 +25,4 @@ examples/shifts
 examples/bitwise_operators
 examples/float_simple
 examples/math
+examples/float_passing

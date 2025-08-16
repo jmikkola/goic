@@ -991,8 +991,12 @@ compileArg :: Expression Type ->  Compiler [ASM]
 compileArg argExpr = do
   compiled <- compileExpression argExpr
   pushStack
-  -- TODO: This needs to push the right type (XMM0 or RAX!)
-  return $ compiled ++ [Instruction $ Push (Register8 RAX)]
+
+  let instr = if exprType argExpr == Float
+        then [ Sub (Register8 RSP) (Immediate 8)
+             , Movq (R8Address RSP) (XMM 0) ]
+        else [ Push (Register8 RAX) ]
+  return $ compiled ++ toASM instr
 
 toASM :: [Instr] -> [ASM]
 toASM = map Instruction

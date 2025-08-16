@@ -408,26 +408,26 @@ compileBody t argNames body = do
   state <- get
   put $ state { localVars = localVarOffsets }
 
-  let prologue = map Instruction functionPrologue
+  let prologue = toASM functionPrologue
   -- the prologue contains one push
   pushStack
 
-  let saveArgs = map Instruction $ saveArguments argNames
+  let saveArgs = toASM $ saveArguments argNames
   -- saveArgs can contain multiple pushes
   changeStackDepth (length saveArgs)
 
   let reserveLocalSpace =
         if nLocalVars == 0
         then []
-        else [ Instruction $ Sub (Register8 RSP) (Immediate (8 * nLocalVars)) ]
+        else toASM [ Sub (Register8 RSP) (Immediate (8 * nLocalVars)) ]
   changeStackDepth nLocalVars
 
-  let epilogue = map Instruction functionEpilogue
+  let epilogue = toASM functionEpilogue
   -- the epilog resets RSP back to RBP, so it wipes out most of the current
   -- stack frame.
 
   compiledBody <- compileStatement body
-  let end = if (take 1 $ reverse compiledBody) == [Instruction Ret] then [] else [Instruction Ret]
+  let end = toASM $ if (take 1 $ reverse compiledBody) == [Instruction Ret] then [] else [Ret]
 
   return $ prologue ++ saveArgs ++ reserveLocalSpace ++ compiledBody ++ epilogue ++ end
 

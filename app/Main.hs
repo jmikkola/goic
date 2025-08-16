@@ -405,6 +405,9 @@ compileBody t argNames body = do
   let localVarOffsets = Map.fromList $ zip localVarNames [localVarOffset..]
   let nLocalVars = Map.size localVarOffsets
 
+  let (FnType argTypes _) = t
+  let argPassingPlan = argPassing argTypes
+
   state <- get
   put $ state { localVars = localVarOffsets }
 
@@ -412,7 +415,7 @@ compileBody t argNames body = do
   -- the prologue contains one push
   pushStack
 
-  let saveArgs = toASM $ saveArguments argNames
+  let saveArgs = toASM $ saveArguments argPassingPlan
   -- saveArgs can contain multiple pushes
   changeStackDepth (length saveArgs)
 
@@ -442,10 +445,17 @@ findLocalVars stmt = findLV stmt Set.empty
         findLVList sts names =
           foldr findLV names sts
 
-saveArguments :: [String] -> [Instr]
-saveArguments argNames =
-  [ Push $ Register8 reg
-  | (_, reg) <- zip argNames argRegisters ]
+saveArguments :: ArgPassing -> [Instr]
+saveArguments argPassingPlan =
+  let saveIntArgs =
+        [ Push $ Register8 reg
+        | (_, reg) <- registerArgs argPassingPlan ]
+      saveFloatArgsList =
+        [ [ Sub (Register8 RSP) (Immediate 8)
+          , Movsd (R8Address RSP) (XMM xmm) ]
+        | (_, xmm) <- floatingArgs argPassingPlan ]
+      saveFloatArgs = concat saveFloatArgsList
+  in saveFloatArgs ++ saveIntArgs
 
 functionPrologue :: [Instr]
 functionPrologue =

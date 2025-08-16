@@ -871,16 +871,7 @@ compileCall fnName args = do
     else
         return (0, [])
 
-  -- Push the 7th and following args.
-  -- The 7th arg ends up being the top of the stack, the 8th arg after that, etc.
-  -- Explanation of the formula:
-  --  - `8 *`: Words are 8 bytes
-  --  - `alignmentOffset`: account for the `sub RSP 8` and read further back
-  --  - `+ 2 * n`: As this pushes args, RSP changes _and_ this needs to read
-  --    further back
-  let pushArgs =
-        toASM [ Push $ R8Offset (8 * (alignmentOffset + 2 * n)) RSP
-              | n <- [0..nStackArgs-1] ]
+  let pushArgs = pushStackArgs alignmentOffset nArgs argPassingPlan
 
   -- TODO: Save caller saved registers
   let call = [Instruction $ CallI (Address fnName)]
@@ -939,6 +930,50 @@ registerFill nArgs argPassingPlan =
       instructions =
         [ Mov (Register8 r) (R8Offset (toOffset i) RSP)
         | (i, r) <- registerArgs argPassingPlan ]
+  in toASM instructions
+
+{-
+Push arguments that didn't get packed into the integer or floating registers.
+For integer arguments, this is the 7th and following argument.
+
+The stack will contain the values of the arguments already, but in the wrong order:
+- ...values that were pushed...
+- arg7
+- arg8
+- arg9
+Before calling the function, the stack-passed args need to be re-pushed the
+other way around:
+- arg9
+- arg8
+- arg7
+
+A complicating factor is that, because floating and integer args can be mixed,
+the list of args that need to be re-pushed might not be consecutive:
+- arg7
+- arg8 -> saved in XMM0
+- arg9
+so the stack before the call would have non-consecutive args:
+- arg9
+- arg7
+
+Also, as more arguments are re-pushed, the existing ones get further away!
+
+Finally, this may need to account for extra space pushed after the args were
+evaluated for the sake of alignment.
+
+Before starting to re-push any arguments, argument argI will be found at
+`RSP + 8 * (alignmentOffset + nArgs - argI - 1)`
+(Assuming alignmentOffset is zero, this means the last arg is found at RSP+0)
+
+The offset relative to the current value of RSP will then be that value plus 8 *
+nArgsPushed.
+-}
+pushStackArgs :: Int -> Int -> ArgPassing -> [ASM]
+pushStackArgs alignmentOffset nArgs argPassingPlan =
+  let toOffset argI nArgsPushed = 8 * (alignmentOffset + nArgs - argI - 1 + nArgsPushed)
+      args = reverse $ stackArgs argPassingPlan
+      instructions = [ Push (R8Offset (toOffset argI n) RSP)
+                     | (argI, n) <- zip args [0..] ]
   in toASM instructions
 
 compileArg :: Expression Type ->  Compiler [ASM]

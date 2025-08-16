@@ -856,6 +856,7 @@ compileCall fnName args = do
   let nStackArgs = if nArgs > 6 then nArgs - 6 else 0
 
   -- Fill the argument-passing registers with the values from the stack
+  let xmmFill = floatingFill nArgs argPassingPlan
   let regFill = registerFill nArgs argPassingPlan
 
   stackDepth <- getStackDepth
@@ -881,7 +882,7 @@ compileCall fnName args = do
   let cleanup = [Instruction $ Add (Register8 RSP) (Immediate (popSize * 8))]
   changeStackDepth (-popSize)
 
-  return $ argInstrs ++ regFill ++ alignment ++ pushArgs ++ call ++ cleanup
+  return $ argInstrs ++ xmmFill ++ regFill ++ alignment ++ pushArgs ++ call ++ cleanup
 
 data ArgPassing
   = ArgPassing { registerArgs :: [(Int, Reg8)]
@@ -932,6 +933,16 @@ registerFill nArgs argPassingPlan =
         | (i, r) <- registerArgs argPassingPlan ]
   in toASM instructions
 
+-- floatingFill is very similar to registerFill except that it populates XMM
+-- registers
+floatingFill :: Int -> ArgPassing -> [ASM]
+floatingFill nArgs argPassingPlan =
+  let toOffset i = 8 * (nArgs - i - 1)
+      instructions =
+        [ Movsd (XMM r) (R8Offset (toOffset i) RSP)
+        | (i, r) <- floatingArgs argPassingPlan ]
+  in toASM instructions
+
 {-
 Push arguments that didn't get packed into the integer or floating registers.
 For integer arguments, this is the 7th and following argument.
@@ -980,6 +991,7 @@ compileArg :: Expression Type ->  Compiler [ASM]
 compileArg argExpr = do
   compiled <- compileExpression argExpr
   pushStack
+  -- TODO: This needs to push the right type (XMM0 or RAX!)
   return $ compiled ++ [Instruction $ Push (Register8 RAX)]
 
 toASM :: [Instr] -> [ASM]

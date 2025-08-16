@@ -59,6 +59,11 @@ A crazy stretch goal could be to make the compiler self-host.
 
 milestone: usable floats
 
+next:
+- update function bodies to read args passed in xmm regisers
+- fix compileArg
+- fix duplicate `mov rsp, rbp; pop rbp` instructions
+
 - update function calls, function returns, and argument loading to understand floats
 - some way to print them... (should I upgrade the print machinery first?)
 

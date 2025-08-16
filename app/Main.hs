@@ -318,9 +318,10 @@ newLabel = do
 
 compile :: Module Type -> String -> [ASM]
 compile (Module _ functions) filename =
-  let funcTypeMap = Map.fromList [(name, t) | (Function name t _ _) <- functions]
-      startingState = emptyCompileState { functionTypes = funcTypeMap }
-      (fnTexts, state) = runState (mapM compileFunction functions) emptyCompileState
+  let funcTypes = [(name, t) | (Function name t _ _) <- functions]
+      allFuncTypes = funcTypes ++ builtinFunctions
+      startingState = emptyCompileState { functionTypes = Map.fromList allFuncTypes }
+      (fnTexts, state) = runState (mapM compileFunction functions) startingState
       dataSection = [Directive "section" [".data"]]
       stringDecls = compileStringDecls (strings state)
       textSection = [Directive "section" [".text"]]
@@ -840,7 +841,9 @@ compileCall fnName []   =
   return [Instruction $ CallI (Address fnName)]
 compileCall fnName args = do
   state <- get
-  let Just (FnType argTypes _) = Map.lookup fnName (functionTypes state)
+  let argTypes = case Map.lookup fnName (functionTypes state) of
+        Nothing -> error ("function " ++ fnName ++ " should have been defined")
+        Just (FnType ats _) -> ats
 
   let nArgs = length args
   let argPassingPlan = argPassing argTypes
@@ -853,10 +856,7 @@ compileCall fnName args = do
   let nStackArgs = if nArgs > 6 then nArgs - 6 else 0
 
   -- Fill the argument-passing registers with the values from the stack
-  let regFill =
-        [ Instruction $ Mov (Register8 r) (R8Offset (i * 8) RSP)
-        | (r, i) <- zip argRegisters (reverse [0..nArgs - 1])
-        ]
+  let regFill = registerFill nArgs argPassingPlan
 
   stackDepth <- getStackDepth
   -- The stack needs to be left in a 16 byte alignment before the call.
@@ -912,6 +912,35 @@ argPassing types = ArgPassing { registerArgs = regArgs, floatingArgs = flArgs, s
         flArgs  = zip xmm  [0..]
         other   = [i | (i,_) <- indexedArgs, not (i `elem` xmm || i `elem` regs)]
 
+{-
+When preparing to call a fucntion foo(a, b, c), the arguments are evaluated left to
+right and pushed on the stack as they are evaluated. The result is the stack
+looks like:
+- RSP+16: a's value
+- RSP+8:  b's value
+- RSP+0:  c's value
+
+These values all need to be passed in registers. The argument passing plan for
+them will look like:
+[ (0, RDI) -- a
+, (1, RSI) -- b
+, (2, RDX) -- c
+]
+
+To get the value of `a` (argument 0), the math is
+  (nArgs - i - 1) * 8
+= (3 - 0 - 1) * 8
+= 2 * 8
+= 16
+-}
+registerFill :: Int -> ArgPassing -> [ASM]
+registerFill nArgs argPassingPlan =
+  let toOffset i = 8 * (nArgs - i - 1)
+      instructions =
+        [ Mov (Register8 r) (R8Offset (toOffset i) RSP)
+        | (i, r) <- registerArgs argPassingPlan ]
+  in toASM instructions
+
 compileArg :: Expression Type ->  Compiler [ASM]
 compileArg argExpr = do
   compiled <- compileExpression argExpr
@@ -949,8 +978,13 @@ type Err = String
 
 builtins :: Names
 builtins =
-  [ ("puts", (Func $ FnType [String] Void, Builtin))
-  , ("putchar", (Func $ FnType [Int] Void, Builtin))
+  [ (name, (Func fnType, Builtin))
+  | (name, fnType) <- builtinFunctions ]
+
+builtinFunctions :: [(String, FnType)]
+builtinFunctions =
+  [ ("puts", FnType [String] Void)
+  , ("putchar", FnType [Int] Void)
   ]
 
 checkModule :: Module a -> Either Err (Module Type)

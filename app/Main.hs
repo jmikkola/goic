@@ -483,11 +483,11 @@ compileStatement statement = case statement of
   EStatement expr -> compileExpression expr
   Return     expr -> do
     exprInstrs <- compileExpression expr
-    let instructions = exprInstrs ++ (map Instruction functionEpilogue) ++ [Instruction Ret]
+    let instructions = exprInstrs ++ (toASM functionEpilogue) ++ [Instruction Ret]
     return instructions
   BareReturn      -> do
     let instructions = functionEpilogue ++ [Ret]
-    return $ map Instruction instructions
+    return $ toASM instructions
   NewVar name t expr ->
     compileNewVar name expr
   Assign name expr ->
@@ -555,13 +555,12 @@ compileWhile test body = do
             -- Evaluate the test condition
             , testAsm
             -- Check if the result is 0 (false) and exit loop if so
-            , [ Instruction $ Cmp (Register8 RAX) (Immediate 0)
-              , Instruction $ Je endLabel
-              ]
+            , toASM [ Cmp (Register8 RAX) (Immediate 0)
+                    , Je endLabel ]
             -- Execute the loop body
             , bodyAsm
             -- Jump back to the start of the loop to re-evaluate
-            , [ Instruction $ Jmp startLabel ]
+            , toASM [ Jmp startLabel ]
             -- The end label to exit the loop
             , [ Label endLabel ]
             ]
@@ -591,9 +590,8 @@ compileIf expr tcase ecase = do
 
   let results =
         [ testAsm
-        , [ Instruction $ Cmp (Register8 RAX) (Immediate 0)
-          , Instruction $ Je elseLabel
-          ]
+        , toASM [ Cmp (Register8 RAX) (Immediate 0)
+                , Je elseLabel ]
         , thenCase
         , [ Instruction $ Jmp endLabel
           , Label elseLabel

@@ -328,7 +328,7 @@ compile (Module _ functions) filename =
       stringDecls = compileStringDecls (strings state)
       textSection = [Directive "section" [".text"]]
       externs = [ Directive "extern" [name]
-                | name <- ["puts", "putchar"] ]
+                | name <- ["puts", "putchar", "printf"] ]
   in externs ++ dataSection ++ constants ++ stringDecls ++ textSection ++ defineStart ++ concat fnTexts
 
 constants :: [ASM]
@@ -1074,6 +1074,8 @@ builtinFunctions :: [(String, FnType)]
 builtinFunctions =
   [ ("puts", FnType [String] Void)
   , ("putchar", FnType [Int] Void)
+  -- temporary hack until the type system can handle this
+  , ("printf", FnType [String, Float] Void)
   ]
 
 checkModule :: Module a -> Either Err (Module Type)

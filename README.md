@@ -60,6 +60,10 @@ A crazy stretch goal could be to make the compiler self-host.
 milestone: usable floats
 
 - some way to print them... (should I upgrade the print machinery first?)
+    - printf isn't working, due to a few things:
+    - the need to set eax to 1 indicating one vararg
+    - (maybe) the use of mov rax, str0 instead of lea rax, [rel str0]
+    - the fact that I'm defining my own _start instead of using the one from glibc
 
 milestone: casting
 

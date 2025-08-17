@@ -4,7 +4,7 @@ import Control.Monad.Extra (concatMapM)
 import Control.Monad.State (State, get, put, runState)
 import Data.Bits.Floating (coerceToWord)
 import Data.Char (toLower)
-import Data.List (elemIndex)
+import Data.List (elemIndex, findIndex)
 import Data.Map (Map)
 import qualified Data.Map as Map
 import Data.Set (Set)
@@ -292,6 +292,7 @@ data CompileState =
   , localVars          :: Map String Int -- local var offsets
   , stackDepth         :: Int
   , functionTypes      :: Map String FnType
+  , argLocations       :: Map String Int -- argument offsets
   }
   deriving (Show)
 
@@ -307,6 +308,7 @@ emptyCompileState =
   , localVars          = Map.empty
   , stackDepth         = 0
   , functionTypes      = Map.empty
+  , argLocations       = Map.empty
   }
 
 newLabel :: Compiler String
@@ -358,6 +360,7 @@ compileFunction (Function name t argNames body) = do
               , localVars = Map.empty
               -- it starts off not aligned to 16 bytes because the call instruction pushes RIP
               , stackDepth = 1
+              , argLocations = Map.empty
               }
   let preamble = functionPreamble name
   asm <- compileBody t argNames body
@@ -366,6 +369,7 @@ compileFunction (Function name t argNames body) = do
   put $ state' { argNames = []
                , localVars = Map.empty
                , stackDepth = 0
+               , argLocations = Map.empty
                }
   return (preamble ++ asm)
 
@@ -409,7 +413,8 @@ compileBody t argNames body = do
   let argPassingPlan = argPassing argTypes
 
   state <- get
-  put $ state { localVars = localVarOffsets }
+  put $ state { localVars = localVarOffsets
+              , argLocations = toArgLocations argNames argPassingPlan }
 
   let prologue = toASM functionPrologue
   -- the prologue contains one push
@@ -826,17 +831,9 @@ compileVariable t name = do
 lookupVariableOffset :: String -> Compiler Int
 lookupVariableOffset name = do
   state <- get
-  case elemIndex name (argNames state) of
-    Just idx ->
-      if idx < 6
-         -- read args inside this stack frame where they were saved
-         -- from the registers by this function
-         then return $ (idx + 1) * (-8)
-         -- read args from the previous stack frame where they were
-         -- saved by the caller
-         -- (-6: ignore the first 6 indexes, +2: skip over where RBP
-         -- and RIP are stored on the stack)
-         else return $ (idx - 6 + 2) * 8
+  case Map.lookup name (argLocations state) of
+    Just offset ->
+      return offset
     Nothing -> do
       offset <- lookupLocalVar name
       return $ offset * (-8)
@@ -911,6 +908,37 @@ argPassing types = ArgPassing { registerArgs = regArgs, floatingArgs = flArgs, s
         regArgs = zip regs argRegisters
         flArgs  = zip xmm  [0..]
         other   = [i | (i,_) <- indexedArgs, not (i `elem` xmm || i `elem` regs)]
+
+toArgLocations :: [String] -> ArgPassing -> Map String Int
+toArgLocations names argPassing =
+  Map.fromList [(name, findArgLocation i argPassing) | (name, i) <- zip names [0..]]
+
+-- This relies on the fact that `saveArguments` saves args in XMM registers to
+-- the stack first before args in the integer registers.
+findArgLocation :: Int -> ArgPassing -> Int
+findArgLocation argI argPassing =
+  let argsInXMM   = floatingArgs argPassing
+      argsInReg   = registerArgs argPassing
+      argsInStack = stackArgs    argPassing
+
+      matchReg (idx, _reg) = idx == argI
+
+      numFloating = length argsInXMM
+
+      idxToFloatLoc idx = (idx + 1) * (-8)
+      idxToIntLoc   idx = (idx + 1 + numFloating) * (-8)
+      idxToStackLoc idx = (idx + 2) * 8 -- +2 to skip over where RBP and RIP were pushed
+
+      floatLocation = fmap idxToFloatLoc $ findIndex matchReg argsInXMM
+      intLocation   = fmap idxToIntLoc   $ findIndex matchReg argsInReg
+      stackLocation = fmap idxToStackLoc $ elemIndex argI     argsInStack
+
+      err = error "argument not found in arg passing plan"
+  in floatLocation `orElse` (intLocation `orElse` (stackLocation `orElse` err))
+
+orElse :: Maybe a -> a -> a
+orElse (Just x) _ = x
+orElse Nothing  y = y
 
 {-
 When preparing to call a fucntion foo(a, b, c), the arguments are evaluated left to

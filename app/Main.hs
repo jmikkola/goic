@@ -430,14 +430,18 @@ compileBody t argNames body = do
         else toASM [ Sub (Register8 RSP) (Immediate (8 * nLocalVars)) ]
   changeStackDepth nLocalVars
 
-  let epilogue = toASM functionEpilogue
-  -- the epilog resets RSP back to RBP, so it wipes out most of the current
-  -- stack frame.
-
   compiledBody <- compileStatement body
-  let end = toASM $ if (take 1 $ reverse compiledBody) == [Instruction Ret] then [] else [Ret]
+  let endInstrs = if compiledBody `endsWith` (Instruction Ret)
+                  then []
+                  else functionEpilogue ++ [Ret]
+  let end = toASM endInstrs
 
-  return $ prologue ++ saveArgs ++ reserveLocalSpace ++ compiledBody ++ epilogue ++ end
+  return $ prologue ++ saveArgs ++ reserveLocalSpace ++ compiledBody ++ end
+
+endsWith :: (Eq a) => [a] -> a -> Bool
+endsWith []     _ = False
+endsWith [x]    y = x == y
+endsWith (x:xs) y = endsWith xs y
 
 findLocalVars :: Statement a -> Set String
 findLocalVars stmt = findLV stmt Set.empty

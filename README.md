@@ -59,51 +59,14 @@ A crazy stretch goal could be to make the compiler self-host.
 
 milestone: usable floats
 
-- some way to print them... (should I upgrade the print machinery first?)
-    - printf isn't working, due to a few things:
-    - the need to set eax to 1 indicating one vararg
-    - (maybe) the use of mov rax, str0 instead of lea rax, [rel str0]
-    - the fact that I'm defining my own _start instead of using the one from glibc
+Next steps for printing floats:
 
-Temp notes on how to run printf:
-
-```
-extern	printf
-
-section	.data
-	str0 db "%f", 10, 0
-    pi dq 3.14159
-
-section	.text
-global	main
-main:
-	push	rbp
-	mov	rbp, rsp
-    movsd	xmm0, qword [rel pi]
-	lea	rdi, [rel str0]
-    mov rax, 1
-	call	printf wrt ..plt
-	mov	rsp, rbp
-	pop	rbp
-	ret
-
-section .note.GNU-stack noalloc noexec nowrite progbits
-
-;;; Compilation:
-;;; yasm  -f elf64 main.asm -o main.o
-;;; gcc -o main main.o
-
-;;; Important details:
-;;; - setting eax to the number of varargs
-;;; - [rel pi] instead of [pi] to get the value
-;;; - `wrt ..plt` after the call instruction to make it relocatable
-;;; - linking with gcc instead of calling ld directly
-;;; - the section directive at the end to make gcc happy about the stack
-
-;;; Details that turned out to not be important:
-;;; - .rodata instead of .data
-```
-
+- [done] get rid of _start, link with gcc instead
+- [done] relative references to .rodata
+- [done] relocatable external calls
+- [done] stack note
+- set eax to 1 when calling printf
+- fix how \n is stored in strings
 
 milestone: casting
 

@@ -88,18 +88,9 @@ assemble name =
   in runSubprocess "yasm" args
 
 link :: String -> IO ()
-link name =
-  let args = [ "-g"
-             , "-o"
-             , name
-             , name ++ ".o"
-             , "-lc"
-             , "--dynamic-linker"
-             , "/lib64/ld-linux-x86-64.so.2"
-             , "-e"
-             , "_start"
-             ]
-  in runSubprocess "ld" args
+link name = runSubprocess "gcc" args
+  -- Let `gcc` pick the flags to pass to `ld`
+  where args = ["-g", "-o", name, name ++ ".o"]
 
 --
 -- Process utility
@@ -155,6 +146,7 @@ data Instr
   | Sar Arg Arg
   | Cqo
   | CallI Arg
+  | CallRel String
   | Cmp Arg Arg
   | Ucomisd Arg Arg
   | Setl Arg
@@ -177,6 +169,7 @@ data Instr
 data Arg
   = Immediate Int
   | Address String
+  | AddressVal String
   | Register8 Reg8
   | Register4 Reg4
   | Register1 Reg1
@@ -214,6 +207,7 @@ instance Render Arg where
   render arg = case arg of
     Immediate n -> show n
     Address s   -> s
+    AddressVal s -> "[rel " ++ s ++ "]"
     Register8 r -> render r
     Register4 r -> render r
     Register1 r -> render r
@@ -256,6 +250,7 @@ instance Render Instr where
     Sar a b   -> "sar\t" ++ render a ++ ", " ++ render b
     Cqo       -> "cqo"
     CallI arg -> "call\t" ++ render arg
+    CallRel a -> "call\t" ++ a ++ " wrt ..plt"
     Cmp a b   -> "cmp\t" ++ render a ++ ", " ++ render b
     Ucomisd a b -> "ucomisd\t" ++ render a ++ ", " ++ render b
     Setl arg  -> "setl\t" ++ render arg
@@ -324,27 +319,12 @@ compile (Module _ functions) filename =
       allFuncTypes = funcTypes ++ builtinFunctions
       startingState = emptyCompileState { functionTypes = Map.fromList allFuncTypes }
       (fnTexts, state) = runState (mapM compileFunction functions) startingState
-      dataSection = [Directive "section" [".data"]]
+      dataSection = [Directive "section" [".rodata"]]
       stringDecls = compileStringDecls (strings state)
       textSection = [Directive "section" [".text"]]
-      externs = [ Directive "extern" [name]
-                | name <- ["puts", "putchar", "printf"] ]
-  in externs ++ dataSection ++ constants ++ stringDecls ++ textSection ++ defineStart ++ concat fnTexts
-
-constants :: [ASM]
-constants =
-  [ Constant "SYS_exit" "equ" "60"
-  , Constant "EXIT_SUCCESS" "equ" "0" ]
-
-defineStart :: [ASM]
-defineStart =
-  let callMain = [Instruction $ CallI $ Address "main"]
-      exitSuccess =
-        [ Instruction $ Mov (Register8 RAX) (Address "SYS_exit")
-        , Instruction $ Mov (Register8 RDI) (Address "EXIT_SUCCESS")
-        , Instruction $ Syscall
-        ]
-  in functionPreamble "_start" ++ callMain ++ exitSuccess
+      externs = [ Directive "extern" [name] | name <- builtinNames ]
+      footer = [Directive "section" [".note.GNU-stack noalloc noexec nowrite progbits"]]
+  in externs ++ dataSection ++ stringDecls ++ textSection ++ concat fnTexts ++ footer
 
 compileStringDecls :: Map String String -> [ASM]
 compileStringDecls strs =
@@ -629,7 +609,7 @@ compileLiteral value = case value of
     return [Instruction $ Mov (Register8 RAX) (Immediate i)]
   VString s -> do
     varname <- addString s
-    return [Instruction $ Mov (Register8 RAX) (Address varname)]
+    return [Instruction $ Lea (Register8 RAX) (AddressVal varname)]
   VFloat f -> do
     return $ toASM [ Mov (Register8 RAX) (Immediate $ fromIntegral $ coerceToWord f)
                    , Movq (XMM 0) (Register8 RAX) ]
@@ -843,9 +823,18 @@ lookupVariableOffset name = do
 argRegisters :: [Reg8]
 argRegisters = [RDI, RSI, RDX, RCX, R8, R9]
 
+isBuiltin :: String -> Bool
+isBuiltin fnName = elem fnName builtinNames
+
+callInstructionFor :: String -> [ASM]
+callInstructionFor fnName =
+  if isBuiltin fnName
+  then toASM [CallRel fnName]
+  else toASM [CallI (Address fnName)]
+
 compileCall :: String -> [Expression Type] -> Compiler [ASM]
 compileCall fnName []   =
-  return [Instruction $ CallI (Address fnName)]
+  return $ callInstructionFor fnName
 compileCall fnName args = do
   state <- get
   let argTypes = case Map.lookup fnName (functionTypes state) of
@@ -882,11 +871,11 @@ compileCall fnName args = do
   let pushArgs = pushStackArgs alignmentOffset nArgs argPassingPlan
 
   -- TODO: Save caller saved registers
-  let call = [Instruction $ CallI (Address fnName)]
+  let call = callInstructionFor fnName
   -- TODO: Restore caller saved registers
 
   let popSize = nArgs + nStackArgs + alignmentOffset
-  let cleanup = [Instruction $ Add (Register8 RSP) (Immediate (popSize * 8))]
+  let cleanup = toASM [Add (Register8 RSP) (Immediate (popSize * 8))]
   changeStackDepth (-popSize)
 
   return $ argInstrs ++ xmmFill ++ regFill ++ alignment ++ pushArgs ++ call ++ cleanup
@@ -1069,6 +1058,9 @@ builtins :: Names
 builtins =
   [ (name, (Func fnType, Builtin))
   | (name, fnType) <- builtinFunctions ]
+
+builtinNames :: [String]
+builtinNames = map fst builtinFunctions
 
 builtinFunctions :: [(String, FnType)]
 builtinFunctions =

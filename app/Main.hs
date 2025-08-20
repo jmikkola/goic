@@ -3,7 +3,7 @@ module Main where
 import Control.Monad.Extra (concatMapM)
 import Control.Monad.State (State, get, put, runState)
 import Data.Bits.Floating (coerceToWord)
-import Data.Char (toLower)
+import Data.Char (toLower, ord)
 import Data.List (elemIndex, findIndex)
 import Data.Map (Map)
 import qualified Data.Map as Map
@@ -329,8 +329,23 @@ compile (Module _ functions) filename =
 compileStringDecls :: Map String String -> [ASM]
 compileStringDecls strs =
   -- the ", 0" at the end adds a null termination
-  [ Constant name "db" (show value ++ ", 0")
+  [ Constant name "db" (stringLit value ++ ", 0")
   | (name, value) <- Map.toList strs ]
+
+stringLit :: String -> String
+stringLit []       = ""
+stringLit s@(c:cs) =
+  if printable c
+  then let (stringPart, rest) = span printable s
+       in show stringPart ++ stringLitRest rest
+  else show (ord c) ++ stringLitRest cs
+
+stringLitRest [] = ""
+stringLitRest s  = ", " ++ stringLit s
+
+printable :: Char -> Bool
+printable c =
+  ord c >= ord ' '
 
 compileFunction :: Function Type -> Compiler [ASM]
 compileFunction (Function name t argNames body) = do
@@ -1596,5 +1611,8 @@ valueParser :: Parser Value
 valueParser = choice
     [ try (VFloat <$> float)
     , VInt . fromInteger <$> integer
-    , VString <$> stringLiteral
+    , VString . unescape <$> stringLiteral
     ]
+
+unescape :: String -> String
+unescape s = read $ "\"" ++ s ++ "\""

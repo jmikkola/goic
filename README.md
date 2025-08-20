@@ -57,21 +57,6 @@ A crazy stretch goal could be to make the compiler self-host.
 
 ### for building floats
 
-milestone: usable floats
-
-Next steps for printing floats:
-
-- [done] get rid of _start, link with gcc instead
-- [done] relative references to .rodata
-- [done] relocatable external calls
-- [done] stack note
-- set eax to 1 when calling printf
-    - [done] create an (internal-only, for now) type that represents a vararg
-    - [done] update the typechecker to accept it
-    - [done] update codegen to pay attention to it
-    - [done] update arg planning to handle varargs
-- fix how \n is stored in strings
-
 milestone: casting
 
 - add syntax for casting between floats and ints

@@ -145,6 +145,9 @@ data Instr
   | Sal Arg Arg
   | Sar Arg Arg
   | Cqo
+  | Pxor Arg Arg
+  | Cvtsi2sd Arg Arg
+  | Cvttsd2si Arg Arg
   | CallI Arg
   | CallRel String
   | Cmp Arg Arg
@@ -249,6 +252,9 @@ instance Render Instr where
     Sal a b   -> "sal\t" ++ render a ++ ", " ++ render b
     Sar a b   -> "sar\t" ++ render a ++ ", " ++ render b
     Cqo       -> "cqo"
+    Pxor a b  -> "pxor\t" ++ render a ++ ", " ++ render b
+    Cvtsi2sd a b -> "cvtsi2sd\t" ++ render a ++ ", " ++ render b
+    Cvttsd2si a b -> "cvttsd2si\t" ++ render a ++ ", " ++ render b
     CallI arg -> "call\t" ++ render arg
     CallRel a -> "call\t" ++ a ++ " wrt ..plt"
     Cmp a b   -> "cmp\t" ++ render a ++ ", " ++ render b
@@ -617,6 +623,16 @@ compileExpression expression = case expression of
     -- TODO: Ensure that `fnName` refers to a function not a local or argument
     Variable _ fnName -> compileCall fnName args
     _                 -> error "cannot handle function pointers yet"
+  Cast t arg               -> compileCast t arg
+
+compileCast :: Type -> Expression Type -> Compiler [ASM]
+compileCast toType expr = do
+  exprASM <- compileExpression expr
+  let castInstr = case toType of
+        Float -> [Pxor (XMM 0) (XMM 0), Cvtsi2sd (XMM 0) (Register8 RAX)]
+        Int   -> [Cvttsd2si (Register8 RAX) (XMM 0)]
+        _     -> error "invalid type for casting"
+  return $ exprASM ++ toASM castInstr
 
 compileLiteral :: Value -> Compiler [ASM]
 compileLiteral value = case value of
@@ -1242,6 +1258,11 @@ typecheck names (Call _ e args) = do
       Right (ret, Call ret fnTyped argsTyped)
     _                                             ->
       Left $ "Cannot call function with type " ++ show fnType ++ " with args of types " ++ show argTypes
+typecheck names (Cast t e) = do
+  (et, eTyped) <- typecheck names e
+  if (t, et) == (Int, Float) || (t, et) == (Float, Int)
+    then return (t, Cast t eTyped)
+    else Left $ "Cannot cast expression with type " ++ show et ++ " to " ++ show t
 
 argTypesMatch :: [Type] -> [Type] -> Bool
 argTypesMatch []       []       = True
@@ -1302,6 +1323,7 @@ data Expression a
     | UnaryOp  a Uop (Expression a)
     | Paren (Expression a)
     | Call a (Expression a) [Expression a]
+    | Cast Type (Expression a)
     deriving (Show)
 
 exprType :: Expression Type -> Type
@@ -1312,6 +1334,7 @@ exprType expr = case expr of
   UnaryOp  t _ _   -> t
   Paren e          -> exprType e
   Call     t _ _   -> t
+  Cast     t _     -> t
 
 data Value
     = VInt Int
@@ -1596,6 +1619,7 @@ term :: Parser (Expression ())
 term = choice
     [ try (Paren <$> parens expression)
     , try call
+    , try cast
     , Literal <$> valueParser
     , Variable () <$> identifier
     ]
@@ -1605,6 +1629,12 @@ call = do
     name <- identifier
     args <- parens (commaSep expression)
     return $ Call () (Variable () name) args
+
+cast :: Parser (Expression ())
+cast = do
+  t <- typeParser
+  arg <- parens (expression)
+  return $ Cast t arg
 
 -- Value and Literal Parsers
 valueParser :: Parser Value

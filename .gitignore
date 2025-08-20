@@ -27,3 +27,4 @@ examples/float_simple
 examples/math
 examples/float_passing
 examples/print_float
+examples/printf

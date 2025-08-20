@@ -841,8 +841,9 @@ compileCall fnName args = do
         Nothing -> error ("function " ++ fnName ++ " should have been defined")
         Just (FnType ats _) -> ats
 
+  let isVarArgs = argTypes `endsWith` VarArg
   let nArgs = length args
-  let argPassingPlan = argPassing argTypes
+  let argPassingPlan = argPassing (map exprType args)
 
   -- Push all N arguments on to the stack, left to right
   argInstrs <- concatMapM compileArg args
@@ -870,6 +871,13 @@ compileCall fnName args = do
 
   let pushArgs = pushStackArgs alignmentOffset nArgs argPassingPlan
 
+  let varArgs =
+        if isVarArgs
+        then
+          let nVarArgs = nArgs - (length argTypes) + 1
+          in toASM [Mov (Register8 RAX) (Immediate nVarArgs)]
+        else []
+
   -- TODO: Save caller saved registers
   let call = callInstructionFor fnName
   -- TODO: Restore caller saved registers
@@ -878,7 +886,7 @@ compileCall fnName args = do
   let cleanup = toASM [Add (Register8 RSP) (Immediate (popSize * 8))]
   changeStackDepth (-popSize)
 
-  return $ argInstrs ++ xmmFill ++ regFill ++ alignment ++ pushArgs ++ call ++ cleanup
+  return $ argInstrs ++ xmmFill ++ regFill ++ alignment ++ pushArgs ++ varArgs ++ call ++ cleanup
 
 data ArgPassing
   = ArgPassing { registerArgs :: [(Int, Reg8)]

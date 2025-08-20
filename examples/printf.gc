@@ -1,0 +1,8 @@
+module main
+
+func main() Void {
+    printf("a float: %f\n", 2.71828)
+    printf("an int: %ld\n", 12345)
+    printf("a string: %s\n", "Hello, world")
+    printf("two ints: %ld, %ld\n", 15, 25)
+}

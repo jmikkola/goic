@@ -45,11 +45,14 @@ This depends on having `yasm` installed.
 ## Next
 
 - Add floats (it would be fun to be able to print the mandelbot set)
+- Add line numbers to error messages
 - Add arrays
 - Add structs
 - Add string operations
 - Handle function pointers
 - Add a small stdlib (e.g. reading files)?
+
+Maybe:
 - Start some optimizations
 - Support modules
 
@@ -78,3 +81,8 @@ for F in examples/*.gc; do echo $F; ./goic $F; done
 # running
 for F in examples/*; do if [[ -x $F ]]; then echo $F; ./$F > /dev/null; echo $?; fi; done
 ```
+
+## Known bugs
+
+- Negative floating values (e.g. -2.0) don't parse as a negative value
+- Unary negate is not enabled for floats

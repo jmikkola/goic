@@ -66,6 +66,9 @@ Next steps for printing floats:
 - [done] relocatable external calls
 - [done] stack note
 - set eax to 1 when calling printf
+    - [done] create an (internal-only, for now) type that represents a vararg
+    - [done] update the typechecker to accept it
+    - update codegen to pay attention to it
 - fix how \n is stored in strings
 
 milestone: casting

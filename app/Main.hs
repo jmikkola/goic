@@ -1066,8 +1066,7 @@ builtinFunctions :: [(String, FnType)]
 builtinFunctions =
   [ ("puts", FnType [String] Void)
   , ("putchar", FnType [Int] Void)
-  -- temporary hack until the type system can handle this
-  , ("printf", FnType [String, Float] Void)
+  , ("printf", FnType [String, VarArg] Void)
   ]
 
 checkModule :: Module a -> Either Err (Module Type)
@@ -1216,10 +1215,17 @@ typecheck names (Call _ e args) = do
   argsAndTypes <- mapM (typecheck names) args
   let (argTypes, argsTyped) = unzip argsAndTypes
   case fnType of
-    (Func (FnType fargs ret)) | fargs == argTypes ->
+    (Func (FnType fargs ret)) | argTypesMatch fargs argTypes ->
       Right (ret, Call ret fnTyped argsTyped)
     _                                             ->
       Left $ "Cannot call function with type " ++ show fnType ++ " with args of types " ++ show argTypes
+
+argTypesMatch :: [Type] -> [Type] -> Bool
+argTypesMatch []       []       = True
+argTypesMatch [VarArg] _        = True
+argTypesMatch (tf:tfs) (ta:tas) = tf == ta && argTypesMatch tfs tas
+argTypesMatch _        _        = False
+
 
 ensureReferenceable :: Names -> Expression a -> Either Err ()
 ensureReferenceable names expr = case expr of
@@ -1352,6 +1358,7 @@ data Type
     | String
     | Char
     | Pointer Type
+    | VarArg
     deriving (Eq, Show)
 
 isPointer :: Type -> Bool

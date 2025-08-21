@@ -7,9 +7,9 @@ func main() Void {
 
     // Mandelbrot parameters
     var max_iter Int = 1000
-    var x_min Float = 0.0 - 2.0
+    var x_min Float = -2.0
     var x_max Float = 1.0
-    var y_min Float = 0.0 - 1.0
+    var y_min Float = -1.0
     var y_max Float = 1.0
 
     var py Int = 0

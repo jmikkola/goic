@@ -1,5 +1,5 @@
 module main
 
 func main() Void {
-    printf("%f\n", 2.71828)
+    printf("%f\n", -2.71828)
 }

@@ -139,6 +139,7 @@ data Instr
   | Divsd Arg Arg
   | AndI Arg Arg
   | XorI Arg Arg
+  | Xorpd Arg Arg
   | OrI Arg Arg
   | NotI Arg
   | Neg Arg
@@ -246,6 +247,7 @@ instance Render Instr where
     Divsd a b -> "divsd\t" ++ render a ++ ", " ++ render b
     AndI a b  -> "and\t" ++ render a ++ ", " ++ render b
     XorI a b  -> "xor\t" ++ render a ++ ", " ++ render b
+    Xorpd a b -> "xorpd\t" ++ render a ++ ", " ++ render b
     OrI a b   -> "or\t" ++ render a ++ ", " ++ render b
     NotI a    -> "not\t" ++ render a
     Neg a     -> "neg\t" ++ render a
@@ -325,7 +327,8 @@ compile (Module _ functions) filename =
       allFuncTypes = funcTypes ++ builtinFunctions
       startingState = emptyCompileState { functionTypes = Map.fromList allFuncTypes }
       (fnTexts, state) = runState (mapM compileFunction functions) startingState
-      dataSection = [Directive "section" [".rodata"]]
+      dataSection = [ Directive "section" [".rodata"]
+                    , Constant "neg_mask_double" "dq" "0x8000000000000000" ]
       stringDecls = compileStringDecls (strings state)
       textSection = [Directive "section" [".text"]]
       externs = [ Directive "extern" [name] | name <- builtinNames ]
@@ -649,7 +652,11 @@ compileUnaryOp :: Uop -> Expression Type -> Compiler [ASM]
 compileUnaryOp op inner = case op of
   Negate -> do
     innerAsm <- compileExpression inner
-    let operation = [ Neg (Register8 RAX) ]
+    let operation =
+          if exprType inner == Float
+          then [ Movsd (XMM 1) (AddressVal "neg_mask_double")
+               , Xorpd (XMM 0) (XMM 1) ]
+          else [ Neg (Register8 RAX) ]
     return $ innerAsm ++ toASM operation
   Not -> do
     innerAsm <- compileExpression inner
@@ -1234,7 +1241,10 @@ typecheck names (UnaryOp _ o inner) = do
           else Left $ "Invalid type for unary " ++ show o ++ ": " ++ show iType
   case o of
     Not           -> mustInt
-    Negate        -> mustInt
+    Negate        ->
+      if iType == Int || iType == Float
+      then return (iType, UnaryOp iType o innerTyped)
+      else Left $ "invalid type for unary negate: " ++ show iType
     BitNot        -> mustInt
     TakeReference -> do
       ensureReferenceable names inner

@@ -79,4 +79,3 @@ for F in examples/*; do if [[ -x $F ]]; then echo $F; ./$F > /dev/null; echo $?;
 ## Known bugs
 
 - Negative floating values (e.g. -2.0) don't parse as a negative value
-- Unary negate is not enabled for floats

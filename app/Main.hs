@@ -367,7 +367,7 @@ compileFunction (Function name t argNames body) = do
               , argLocations = Map.empty
               }
   let preamble = functionPreamble name
-  asm <- compileBody t argNames body
+  asm <- compileBody name t argNames body
   -- Clear the function-specific parts of the state
   state' <- get
   put $ state' { argNames = []
@@ -406,8 +406,8 @@ functionPreamble name =
 
 -- TODO: support optionally saving and restoring the callee-saved registers
 --       that aren't used for arguments
-compileBody :: FnType -> [String] -> Statement Type -> Compiler [ASM]
-compileBody t argNames body = do
+compileBody :: String -> FnType -> [String] -> Statement Type -> Compiler [ASM]
+compileBody fName t argNames body = do
   let localVarNames = Set.toList $ findLocalVars body
   let localVarOffset = 1 + min (length argRegisters) (length argNames)
   let localVarOffsets = Map.fromList $ zip localVarNames [localVarOffset..]
@@ -437,7 +437,10 @@ compileBody t argNames body = do
   compiledBody <- compileStatement body
   let endInstrs = if compiledBody `endsWith` (Instruction Ret)
                   then []
-                  else functionEpilogue ++ [Ret]
+                  else if fName == "main"
+                          -- default to returning zero from main
+                       then functionEpilogue ++ [XorI (Register8 RAX) (Register8 RAX), Ret]
+                       else functionEpilogue ++ [Ret]
   let end = toASM endInstrs
 
   return $ prologue ++ saveArgs ++ reserveLocalSpace ++ compiledBody ++ end

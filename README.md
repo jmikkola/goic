@@ -45,9 +45,11 @@ This depends on having `yasm` installed.
 ## Next
 
 - Add floats (it would be fun to be able to print the mandelbot set)
+- Add syntax for char literals
 - Add line numbers to error messages
 - Add arrays
 - Add structs
+- Add a character type
 - Add string operations
 - Handle function pointers
 - Add a small stdlib (e.g. reading files)?
@@ -57,14 +59,6 @@ Maybe:
 - Support modules
 
 A crazy stretch goal could be to make the compiler self-host.
-
-### for building floats
-
-milestone: casting
-
-- add syntax for casting between floats and ints
-- add typechecking for casts
-- add cast instructions
 
 # Development notes
 

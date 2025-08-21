@@ -339,7 +339,7 @@ compileStringDecls strs =
   | (name, value) <- Map.toList strs ]
 
 stringLit :: String -> String
-stringLit []       = ""
+stringLit []       = "\"\""
 stringLit s@(c:cs) =
   if printable c
   then let (stringPart, rest) = span printable s

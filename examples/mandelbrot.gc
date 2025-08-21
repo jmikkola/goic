@@ -1,0 +1,45 @@
+module main
+
+func main() Void {
+    // Dimensions of the ASCII output
+    var width Int = 80
+    var height Int = 40
+
+    // Mandelbrot parameters
+    var max_iter Int = 1000
+    var x_min Float = 0.0 - 2.0
+    var x_max Float = 1.0
+    var y_min Float = 0.0 - 1.0
+    var y_max Float = 1.0
+
+    var py Int = 0
+    while py < height {
+        var px Int = 0
+        while px < width {
+            // Map pixel to complex plane
+            var x0 Float = x_min + (x_max - x_min) * Float(px) / Float(width - 1)
+            var y0 Float = y_min + (y_max - y_min) * Float(py) / Float(height - 1)
+
+            var x Float = 0.0
+            var y Float = 0.0
+            var iteration Int = 0
+
+            while x * x + y * y <= 4.0 and iteration < max_iter {
+                var xtemp Float = x * x - y * y + x0
+                y = 2.0 * x * y + y0
+                x = xtemp
+                iteration = iteration + 1
+            }
+
+            if iteration == max_iter {
+                putchar(64)
+            } else {
+                putchar(32)
+            }
+
+            px = px + 1
+        }
+        puts("")
+        py = py + 1
+    }
+}

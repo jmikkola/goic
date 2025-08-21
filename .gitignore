@@ -23,3 +23,11 @@ examples/pointers
 examples/add
 examples/shifts
 examples/bitwise_operators
+examples/float_simple
+examples/math
+examples/float_passing
+examples/print_float
+examples/printf
+examples/cast
+examples/test
+examples/mandelbrot

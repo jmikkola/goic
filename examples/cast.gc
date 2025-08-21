@@ -1,0 +1,14 @@
+module main
+
+func main() Void {
+    print_float(Float(10))
+    print_int(Int(3.14))
+}
+
+func print_float(f Float) Void {
+    printf("a float: %f\n", f)
+}
+
+func print_int(i Int) Void {
+    printf("an int: %ld\n", i)
+}

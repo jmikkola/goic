@@ -1,0 +1,10 @@
+module main
+
+func main() Void {
+    var result Float = square(0.5)
+    printf("%f\n", result)
+}
+
+func square(x Float) Float {
+    return x * x
+}

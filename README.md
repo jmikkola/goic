@@ -44,12 +44,16 @@ This depends on having `yasm` installed.
 
 ## Next
 
-- Add floats (it would be fun to be able to print the mandelbot set)
+- Add syntax for char literals
+- Add line numbers to error messages
 - Add arrays
 - Add structs
+- Add a character type
 - Add string operations
 - Handle function pointers
 - Add a small stdlib (e.g. reading files)?
+
+Maybe:
 - Start some optimizations
 - Support modules
 
@@ -68,5 +72,5 @@ Compiling and running all examples:
 # compiling
 for F in examples/*.gc; do echo $F; ./goic $F; done
 # running
-for F in examples/*; do if [[ -x $F ]]; then echo $F; ./$F > /dev/null; fi; done
+for F in examples/*; do if [[ -x $F ]]; then echo $F; ./$F > /dev/null; echo $?; fi; done
 ```

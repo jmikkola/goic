@@ -74,7 +74,3 @@ for F in examples/*.gc; do echo $F; ./goic $F; done
 # running
 for F in examples/*; do if [[ -x $F ]]; then echo $F; ./$F > /dev/null; echo $?; fi; done
 ```
-
-## Known bugs
-
-- Negative floating values (e.g. -2.0) don't parse as a negative value

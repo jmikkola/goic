@@ -1623,7 +1623,16 @@ operatorTable =
     ]
     where
       binary name op = Infix (do{ reservedOp name; return (BinaryOp () op) })
-      prefix name unop = Prefix (do{ reservedOp name; return (UnaryOp () unop) })
+      prefix name unop = Prefix (do{ reservedOp name; return (unaryOp unop) })
+
+unaryOp :: Uop -> Expression () -> Expression ()
+unaryOp Negate inner = case inner of
+  Literal (VFloat f) -> Literal (VFloat (-f))
+  Literal (VInt i)   -> Literal (VInt (-i))
+  -- let the type checker deal with other cases
+  _                  -> UnaryOp () Negate inner
+unaryOp unop inner =
+  UnaryOp () unop inner
 
 term :: Parser (Expression ())
 term = choice

@@ -423,7 +423,7 @@ compileBody t argNames body = do
 
   let saveArgs = toASM $ saveArguments argPassingPlan
   -- saveArgs can contain multiple pushes
-  changeStackDepth (length saveArgs)
+  changeStackDepth ((length $ registerArgs argPassingPlan) + (length $ floatingArgs argPassingPlan))
 
   let reserveLocalSpace =
         if nLocalVars == 0

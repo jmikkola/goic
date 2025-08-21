@@ -1,14 +1,20 @@
 module main
 
 func main() Void {
-    print_float(3.14)
-    print_int(10)
+    just_printf()
+    two_float_arg(3.14, 1.0)
+    one_float_arg(3.14)
 }
 
-func print_float(f Float) Void {
-    printf("a float: %f\n", f)
+func just_printf() Void {
+    printf("just_printf, %ld\n", 12345)
 }
 
-func print_int(i Int) Void {
-    printf("an int: %ld\n", i)
+func two_float_arg(f Float, f2 Float) Void {
+    printf("two_float_arg, %ld\n", 12345)
 }
+
+func one_float_arg(f Float) Void {
+    printf("one_float_arg, %ld\n", 12345)
+}
+

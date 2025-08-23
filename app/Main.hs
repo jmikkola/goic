@@ -1485,6 +1485,7 @@ whiteSpace    = Token.whiteSpace lexer
 integer       = Token.integer lexer
 float         = Token.float lexer
 stringLiteral = Token.stringLiteral lexer
+charLiteral   = Token.charLiteral lexer
 
 -- Module Parser
 moduleParser :: Parser (Module ())
@@ -1664,6 +1665,7 @@ valueParser = choice
     [ try (VFloat <$> float)
     , VInt . fromInteger <$> integer
     , VString . unescape <$> stringLiteral
+    , VInt . ord <$> charLiteral
     ]
 
 unescape :: String -> String

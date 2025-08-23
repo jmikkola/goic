@@ -32,9 +32,9 @@ func main() Void {
             }
 
             if iteration == max_iter {
-                putchar(64)
+                putchar('@')
             } else {
-                putchar(32)
+                putchar(' ')
             }
 
             px = px + 1

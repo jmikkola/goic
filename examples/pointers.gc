@@ -4,12 +4,12 @@ func printint(n Int) Void {
     if n / 10 > 0 {
         printint(n / 10)
     }
-    putchar(n % 10 + 48)
+    putchar(n % 10 + '0')
 }
 
 func use_pointer(n *Int) Void {
     printint(*n)
-    putchar(10) // 10 = '\n'
+    putchar('\n')
 }
 
 func take_pointer(n Int) Void {

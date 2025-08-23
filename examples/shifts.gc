@@ -3,16 +3,16 @@ module main
 
 func main() Void {
     printint(10 << 1)
-    putchar(10)
+    putchar('\n')
 
     printint(10 << 2)
-    putchar(10)
+    putchar('\n')
 
     printint(10 >> 1)
-    putchar(10)
+    putchar('\n')
 
     printint(10 >> 2)
-    putchar(10)
+    putchar('\n')
 }
 
 
@@ -20,6 +20,6 @@ func printint(n Int) Void {
     if n / 10 > 0 {
         printint(n / 10)
     }
-    putchar(n % 10 + 48) // 48 = '0'
+    putchar(n % 10 + '0')
 }
 

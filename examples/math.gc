@@ -4,12 +4,12 @@ func printint(n Int) Void {
     if n / 10 > 0 {
         printint(n / 10)
     }
-    putchar(n % 10 + 48)
+    putchar(n % 10 + '0')
 }
 
 func main() Void {
     var a Int = 100
     var b Int = 3
     printint(a - b)
-    putchar(10)
+    putchar('\n')
 }

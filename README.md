@@ -44,7 +44,7 @@ This depends on having `yasm` installed.
 
 ## Next
 
-- Add syntax for char literals
+- Fix eax in varargs
 - Add line numbers to error messages
 - Add arrays
 - Add structs

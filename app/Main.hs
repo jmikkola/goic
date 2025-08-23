@@ -915,8 +915,11 @@ compileCall fnName args = do
   let varArgs =
         if isVarArgs
         then
-          let nVarArgs = nArgs - (length argTypes) + 1
-          in toASM [Mov (Register8 RAX) (Immediate nVarArgs)]
+          let nNonVarArgs = length args - 1
+              varArgs = drop nNonVarArgs args
+              floatingVarArgs = [arg | arg <- varArgs, exprType arg == Float]
+              nFloatingVarArgs = length floatingVarArgs
+          in toASM [Mov (Register8 RAX) (Immediate nFloatingVarArgs)]
         else []
 
   -- TODO: Save caller saved registers

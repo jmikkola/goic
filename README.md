@@ -44,7 +44,6 @@ This depends on having `yasm` installed.
 
 ## Next
 
-- Fix eax in varargs
 - Add line numbers to error messages
 - Add arrays
 - Add structs
